@@ -1,6 +1,6 @@
 {
   "name": "figma-mcp-console",
-  "version": "0.5.2",
+  "version": "0.5.4",
   "scripts": {
     "prepublishOnly": "cp ../README.md ./README.md"
   },
