@@ -176,7 +176,8 @@ type instancePropertiesArgs struct {
 
 type runScriptArgs struct {
 	fileArg
-	Code string `json:"code" jsonschema:"JavaScript body executed in the Figma plugin sandbox. figma is in scope, await is allowed, and the value you return becomes the tool result. Return plain data only (ids, numbers, strings, arrays), never Figma node objects"`
+	Code            string `json:"code" jsonschema:"JavaScript body executed in the Figma plugin sandbox. figma is in scope, await is allowed, and the value you return becomes the tool result. Return plain data only (ids, numbers, strings, arrays), never Figma node objects"`
+	RollbackOnError bool   `json:"rollback_on_error,omitempty" jsonschema:"delete the nodes the script created if it throws, instead of leaving them half-built. Clones made with node.clone() are not tracked"`
 }
 
 type groupArgs struct {
@@ -657,7 +658,12 @@ func Register(s *mcp.Server, b *bridge.Router) {
 	registerBridged[runScriptArgs](s, b, "run_script",
 		"Run a JavaScript body against the Figma Plugin API in one call — the escape hatch for bulk work that would otherwise cost "+
 			"hundreds of atomic calls, such as binding a variable to every white fill in a subtree. "+
-			"figma is in scope, await is allowed, and the returned value (plain data only) becomes the result. "+
+			"figma is in scope, await is allowed, and the returned value (plain data only) becomes the result; return nothing and you get a count of what was created. "+
+			"This is the real Figma Plugin API, not another tool's sandbox: there is no node.query(), node.set() or node.screenshot(), "+
+			"and createAutoLayout(direction, props) exists only as helpers.createAutoLayout. "+
+			"The file is opened with dynamic-page access, so the sync accessors throw — use setFillStyleIdAsync, setStrokeStyleIdAsync, "+
+			"setTextStyleIdAsync, setEffectStyleIdAsync, getMainComponentAsync, getNodeByIdAsync and loadAllPagesAsync. "+
+			"On failure the error names the script line and the nodes already created; pass rollback_on_error to delete them. "+
 			"Prefer the atomic tools for single edits: they give precise errors, while a failed script can leave the document half-changed.",
 		scriptTimeout)
 

@@ -2,7 +2,7 @@
 // Receives {id, command, params} from the Go bridge (relayed through ui.html),
 // executes it against the Figma Plugin API, and replies {id, result|error}.
 
-figma.showUI(__html__, { width: 300, height: 132 });
+figma.showUI(__html__, { width: 280, height: 104 });
 
 // Tell the UI which file this plugin window runs in; the UI forwards it to
 // the bridge on every (re)connect so calls can be routed per file when
@@ -266,6 +266,70 @@ function applyShapeParams(n, params) {
   if (params.fill_color && params.fill_color !== "none") {
     n.fills = [{ type: "SOLID", color: hexToRGB(params.fill_color) }];
   }
+}
+
+// figma.* calls that bring a new node into the document. A script that throws
+// halfway leaves these behind, and the caller has no way to find them.
+const CREATORS = [
+  "createFrame", "createRectangle", "createEllipse", "createText", "createLine",
+  "createPolygon", "createStar", "createVector", "createSlice", "createPage",
+  "createComponent", "createComponentFromNode", "createNodeFromSvg", "createSticky",
+  "group", "flatten", "union", "subtract", "intersect", "exclude", "combineAsVariants",
+];
+
+// A figma facade that records what the script creates. node.clone() cannot be
+// intercepted this way, so clones are not tracked — see the tool description.
+function trackingFigma(created) {
+  try {
+    return new Proxy(figma, {
+      get(target, prop) {
+        const v = target[prop];
+        if (typeof v !== "function") return v;
+        if (CREATORS.indexOf(prop) === -1) return v.bind(target);
+        return function () {
+          const out = v.apply(target, arguments);
+          if (out && typeof out === "object" && out.id) created.push(out.id);
+          return out;
+        };
+      },
+    });
+  } catch (e) {
+    return figma; // host object refused proxying; tracking is best-effort
+  }
+}
+
+// new Function wraps the body in its own header, so a reported line is two
+// ahead of the line the caller wrote.
+function scriptLine(e) {
+  const stack = (e && e.stack) || "";
+  const m = /<anonymous>:(\d+):\d+/.exec(stack) || /Function:(\d+):\d+/.exec(stack);
+  if (!m) return 0;
+  const n = parseInt(m[1], 10) - 2;
+  return n > 0 ? n : 0;
+}
+
+function scriptFailure(e, created, rollback) {
+  let msg = String((e && e.message) || e);
+  // Plan limits read like API errors; say what they actually mean.
+  if (/Limited to \d+ mode/i.test(msg)) {
+    msg += " (Figma plan limit on modes per collection — split the tokens across separate collections)";
+  }
+  const line = scriptLine(e);
+  if (line) msg += " [script line " + line + "]";
+  if (!created.length) return msg;
+  if (rollback) {
+    let removed = 0;
+    for (let i = created.length - 1; i >= 0; i--) {
+      try {
+        const n = figma.getNodeById(created[i]);
+        if (n && !n.removed) { n.remove(); removed++; }
+      } catch (err) {}
+    }
+    return msg + " — rolled back " + removed + " of " + created.length + " node(s) created before the failure";
+  }
+  const shown = created.slice(0, 20).join(", ") + (created.length > 20 ? " (+" + (created.length - 20) + " more)" : "");
+  return msg + " — left behind " + created.length + " node(s): " + shown +
+    "; pass rollback_on_error to delete them automatically";
 }
 
 // Optional extras find_nodes can attach per node, so callers can filter on
@@ -1010,7 +1074,24 @@ const handlers = {
   // so plainly rather than failing with a bare ReferenceError.
   async run_script(params) {
     if (typeof params.code !== "string" || !params.code.trim()) throw new Error("code is required");
-    const helpers = { node, summarize, serialize, hexToRGB, rgbToHex, paintBrief, solidFillHex };
+
+    const created = [];
+    const figmaApi = trackingFigma(created);
+    const helpers = {
+      node, summarize, serialize, hexToRGB, rgbToHex, paintBrief, solidFillHex,
+      // The Plugin API has no createAutoLayout; scripts written against other
+      // Figma tooling reach for it and fail on "not a function".
+      createAutoLayout(direction, props) {
+        const f = figmaApi.createFrame();
+        f.layoutMode = String(direction || "VERTICAL").toUpperCase() === "HORIZONTAL" ? "HORIZONTAL" : "VERTICAL";
+        f.primaryAxisSizingMode = "AUTO";
+        f.counterAxisSizingMode = "AUTO";
+        f.fills = [];
+        if (props) for (const k in props) f[k] = props[k];
+        return f;
+      },
+    };
+
     let fn;
     try {
       fn = new Function("figma", "helpers", '"use strict"; return (async () => {\n' + params.code + "\n})();");
@@ -1020,8 +1101,15 @@ const handlers = {
         "); use the atomic tools instead",
       );
     }
-    const result = await fn(figma, helpers);
-    if (result === undefined) return null;
+
+    let result;
+    try {
+      result = await fn(figmaApi, helpers);
+    } catch (e) {
+      throw new Error(scriptFailure(e, created, !!params.rollback_on_error));
+    }
+    // Knowing how much a script touched is most of what callers check for.
+    if (result === undefined) return { ok: true, created: created.length };
     // The reply is structured-cloned to the UI; a live node would kill the
     // connection, so force plain data here and fail with a clear message.
     try {
@@ -1096,9 +1184,9 @@ async function postSelection() {
   // (the list scrolls beyond that).
   const rows = Math.min(items.length, 6);
   const h = items.length
-    ? 162 + (items.length > 1 ? 22 : 0) + (needsKey ? 64 : 0) + rows * 30
-    : 132;
-  figma.ui.resize(300, h);
+    ? 134 + (items.length > 1 ? 22 : 0) + (needsKey ? 64 : 0) + rows * 30
+    : 104;
+  figma.ui.resize(280, h);
 }
 figma.on("selectionchange", postSelection);
 postSelection();
