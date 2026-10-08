@@ -94,11 +94,27 @@ const cmdListFiles = "_list_files"
 
 // pluginConn is one attached plugin window.
 type pluginConn struct {
-	id      uint64
-	c       *websocket.Conn
-	writeMu sync.Mutex
-	mu      sync.Mutex
-	info    FileInfo
+	id       uint64
+	c        *websocket.Conn
+	writeMu  sync.Mutex
+	mu       sync.Mutex
+	info     FileInfo
+	lastRead time.Time
+}
+
+func (pc *pluginConn) sawFrame() {
+	pc.mu.Lock()
+	pc.lastRead = time.Now()
+	pc.mu.Unlock()
+}
+
+func (pc *pluginConn) quietFor() time.Duration {
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+	if pc.lastRead.IsZero() {
+		return 0
+	}
+	return time.Since(pc.lastRead)
 }
 
 func (pc *pluginConn) file() FileInfo {
@@ -247,6 +263,19 @@ func (b *Bridge) handlePlugin(w http.ResponseWriter, r *http.Request) {
 // pingLoop pings one plugin until ctx is cancelled (the read loop returned)
 // or a ping goes unanswered. An unanswered ping means the window is gone:
 // closing the socket unblocks readPlugin, which cleans up via dropPlugin.
+// inflight counts calls still waiting on one plugin.
+func (b *Bridge) inflight(connID uint64) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	n := 0
+	for _, p := range b.pending {
+		if p.connID == connID {
+			n++
+		}
+	}
+	return n
+}
+
 func (b *Bridge) pingLoop(ctx context.Context, pc *pluginConn) {
 	t := time.NewTicker(pingInterval)
 	defer t.Stop()
@@ -255,6 +284,17 @@ func (b *Bridge) pingLoop(ctx context.Context, pc *pluginConn) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			// A pong is read by the same loop that reads replies, so it queues
+			// behind a multi-megabyte screenshot and can miss its deadline on a
+			// perfectly healthy window. Skip the ping when the plugin has just
+			// sent something, or is still working on a command: the per-call
+			// timeout covers a window that really died mid-command.
+			if pc.quietFor() > 0 && pc.quietFor() < pingInterval {
+				continue
+			}
+			if b.inflight(pc.id) > 0 {
+				continue
+			}
 			pctx, cancel := context.WithTimeout(ctx, pingTimeout)
 			err := pc.c.Ping(pctx)
 			cancel()
@@ -279,6 +319,7 @@ func (b *Bridge) readPlugin(pc *pluginConn) {
 			b.dropPlugin(pc, err)
 			return
 		}
+		pc.sawFrame()
 		if f.Register != nil {
 			pc.mu.Lock()
 			pc.info = *f.Register
@@ -436,14 +477,7 @@ func (b *Bridge) CallFile(ctx context.Context, file, command string, params any,
 		// A plugin runs one command at a time on Figma's main thread, so with
 		// several sessions driving it a timeout usually means queueing rather
 		// than a hang. Say which it was, so the caller knows a retry helps.
-		b.mu.Lock()
-		inflight := 0
-		for _, p := range b.pending {
-			if p.connID == pc.id {
-				inflight++
-			}
-		}
-		b.mu.Unlock()
+		inflight := b.inflight(pc.id)
 		if inflight > 0 {
 			return nil, fmt.Errorf("figma plugin %q did not answer %q within %s; %d other command(s) are still in flight to it, "+
 				"so it is busy rather than stuck — retry, or run fewer sessions against this file at once",
