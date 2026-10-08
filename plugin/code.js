@@ -296,6 +296,17 @@ function scriptFailure(e) {
   return msg;
 }
 
+// A run_script that times out on the server keeps running here: Figma gives
+// no way to abort it. Keyed by token, a retry joins the original run instead
+// of doing its work a second time.
+const scriptRuns = new Map();
+const SCRIPT_MEMO = 20;
+
+function rememberRun(token, promise) {
+  scriptRuns.set(token, promise);
+  while (scriptRuns.size > SCRIPT_MEMO) scriptRuns.delete(scriptRuns.keys().next().value);
+}
+
 // Optional extras find_nodes can attach per node, so callers can filter on
 // style without a get_design_context round-trip per hit.
 const FIELD_GETTERS = {
@@ -308,6 +319,49 @@ const FIELD_GETTERS = {
   opacity: (n) => ("opacity" in n ? n.opacity : undefined),
   characters: (n) => (n.type === "TEXT" ? n.characters : undefined),
 };
+
+// The body of run_script, split out so a token can hold onto its promise.
+async function runScriptBody(params) {
+  const helpers = {
+    node, summarize, serialize, hexToRGB, rgbToHex, paintBrief, solidFillHex,
+    // The Plugin API has no createAutoLayout; scripts written against other
+    // Figma tooling reach for it and fail on "not a function".
+    createAutoLayout(direction, props) {
+      const f = figma.createFrame();
+      f.layoutMode = String(direction || "VERTICAL").toUpperCase() === "HORIZONTAL" ? "HORIZONTAL" : "VERTICAL";
+      f.primaryAxisSizingMode = "AUTO";
+      f.counterAxisSizingMode = "AUTO";
+      f.fills = [];
+      if (props) for (const k in props) f[k] = props[k];
+      return f;
+    },
+  };
+
+  let fn;
+  try {
+    fn = new Function("figma", "helpers", '"use strict"; return (async () => {\n' + params.code + "\n})();");
+  } catch (e) {
+    throw new Error(
+      "the Figma plugin sandbox rejected dynamic code (" + String((e && e.message) || e) +
+      "); use the atomic tools instead",
+    );
+  }
+
+  let result;
+  try {
+    result = await fn(figma, helpers);
+  } catch (e) {
+    throw new Error(scriptFailure(e));
+  }
+  if (result === undefined) return { ok: true };
+  // The reply is structured-cloned to the UI; a live node would kill the
+  // connection, so force plain data here and fail with a clear message.
+  try {
+    return JSON.parse(JSON.stringify(result));
+  } catch (e) {
+    throw new Error("script must return plain data (ids, numbers, strings, arrays), not Figma objects");
+  }
+}
 
 // ---------- command handlers (names match MCP tool names) ----------
 
@@ -1038,47 +1092,11 @@ const handlers = {
   // so plainly rather than failing with a bare ReferenceError.
   async run_script(params) {
     if (typeof params.code !== "string" || !params.code.trim()) throw new Error("code is required");
-
-    const figmaApi = figma;
-    const helpers = {
-      node, summarize, serialize, hexToRGB, rgbToHex, paintBrief, solidFillHex,
-      // The Plugin API has no createAutoLayout; scripts written against other
-      // Figma tooling reach for it and fail on "not a function".
-      createAutoLayout(direction, props) {
-        const f = figmaApi.createFrame();
-        f.layoutMode = String(direction || "VERTICAL").toUpperCase() === "HORIZONTAL" ? "HORIZONTAL" : "VERTICAL";
-        f.primaryAxisSizingMode = "AUTO";
-        f.counterAxisSizingMode = "AUTO";
-        f.fills = [];
-        if (props) for (const k in props) f[k] = props[k];
-        return f;
-      },
-    };
-
-    let fn;
-    try {
-      fn = new Function("figma", "helpers", '"use strict"; return (async () => {\n' + params.code + "\n})();");
-    } catch (e) {
-      throw new Error(
-        "the Figma plugin sandbox rejected dynamic code (" + String((e && e.message) || e) +
-        "); use the atomic tools instead",
-      );
-    }
-
-    let result;
-    try {
-      result = await fn(figmaApi, helpers);
-    } catch (e) {
-      throw new Error(scriptFailure(e));
-    }
-    if (result === undefined) return { ok: true };
-    // The reply is structured-cloned to the UI; a live node would kill the
-    // connection, so force plain data here and fail with a clear message.
-    try {
-      return JSON.parse(JSON.stringify(result));
-    } catch (e) {
-      throw new Error("script must return plain data (ids, numbers, strings, arrays), not Figma objects");
-    }
+    const token = typeof params.token === "string" && params.token ? params.token : null;
+    if (token && scriptRuns.has(token)) return scriptRuns.get(token);
+    const run = runScriptBody(params);
+    if (token) rememberRun(token, run);
+    return run;
   },
 
   async get_screenshot(params) {
@@ -1091,6 +1109,11 @@ const handlers = {
       target = figma.currentPage;
     }
     if (!("exportAsync" in target)) throw new Error("node " + target.id + " cannot be exported");
+    // With dynamic-page access a node can be reachable before its page is
+    // loaded, and exporting then yields a blank image with no error.
+    let owner = target;
+    while (owner && owner.type !== "PAGE") owner = owner.parent;
+    if (owner && typeof owner.loadAsync === "function") await owner.loadAsync();
     const requested = Math.max(0.5, Math.min(params.scale || 1, 4));
     let scale = requested;
     // Cap the output size: huge pages at high scale produce multi-MB base64

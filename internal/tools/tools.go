@@ -179,7 +179,8 @@ type instancePropertiesArgs struct {
 
 type runScriptArgs struct {
 	fileArg
-	Code string `json:"code" jsonschema:"JavaScript body executed in the Figma plugin sandbox. figma is in scope, await is allowed, and the value you return becomes the tool result. Return plain data only (ids, numbers, strings, arrays), never Figma node objects"`
+	Token string `json:"token,omitempty" jsonschema:"an id you choose for this run, e.g. \"build-cards-1\". A timed-out script keeps running in Figma, so resending the same token joins that run and returns its result instead of doing the work twice. Always set it for scripts that create nodes"`
+	Code  string `json:"code" jsonschema:"JavaScript body executed in the Figma plugin sandbox. figma is in scope, await is allowed, and the value you return becomes the tool result. Return plain data only (ids, numbers, strings, arrays), never Figma node objects"`
 }
 
 type groupArgs struct {
@@ -659,17 +660,36 @@ func Register(s *mcp.Server, b *bridge.Router) {
 	registerBridged[setSelectionArgs](s, b, "set_selection",
 		"Select the given nodes in Figma and scroll the viewport to show them.",
 		bridge.DefaultTimeout)
-	registerBridged[runScriptArgs](s, b, "run_script",
-		"Run a JavaScript body against the Figma Plugin API in one call — the escape hatch for bulk work that would otherwise cost "+
-			"hundreds of atomic calls, such as binding a variable to every white fill in a subtree. "+
-			"figma is in scope, await is allowed, and the returned value (plain data only) becomes the result; return nothing and you get a count of what was created. "+
-			"This is the real Figma Plugin API, not another tool's sandbox: there is no node.query(), node.set() or node.screenshot(), "+
-			"and createAutoLayout(direction, props) exists only as helpers.createAutoLayout. "+
-			"The file is opened with dynamic-page access, so the sync accessors throw — use setFillStyleIdAsync, setStrokeStyleIdAsync, "+
-			"setTextStyleIdAsync, setEffectStyleIdAsync, getMainComponentAsync, getNodeByIdAsync and loadAllPagesAsync. "+
-			"On failure the error names the script line; a script that throws partway leaves what it already created in the document, so collect ids as you go if you may need to undo. "+
-			"Prefer the atomic tools for single edits: they give precise errors, while a failed script can leave the document half-changed.",
-		scriptTimeout)
+	// run_script is registered by hand: a timed-out script keeps running in
+	// Figma, so the timeout needs to say that rather than invite a retry.
+	mcp.AddTool(s, &mcp.Tool{Name: "run_script", Description: "Run a JavaScript body against the Figma Plugin API in one call — the escape hatch for bulk work that would otherwise cost " +
+		"hundreds of atomic calls, such as binding a variable to every white fill in a subtree. " +
+		"figma is in scope, await is allowed, and the returned value (plain data only) becomes the result; return nothing and you get a count of what was created. " +
+		"This is the real Figma Plugin API, not another tool's sandbox: there is no node.query(), node.set() or node.screenshot(), " +
+		"and createAutoLayout(direction, props) exists only as helpers.createAutoLayout. " +
+		"The file is opened with dynamic-page access, so the sync accessors throw — use setFillStyleIdAsync, setStrokeStyleIdAsync, " +
+		"setTextStyleIdAsync, setEffectStyleIdAsync, getMainComponentAsync, getNodeByIdAsync and loadAllPagesAsync. " +
+		"On failure the error names the script line; a script that throws partway leaves what it already created in the document, so collect ids as you go if you may need to undo. " +
+		"Prefer the atomic tools for single edits: they give precise errors, while a failed script can leave the document half-changed."},
+		func(ctx context.Context, req *mcp.CallToolRequest, args runScriptArgs) (*mcp.CallToolResult, any, error) {
+			raw, err := b.Call(ctx, args.File, "run_script", args, scriptTimeout)
+			if err != nil {
+				if strings.Contains(err.Error(), "did not answer") {
+					hint := "; Figma cannot abort a running script, so this one is probably still going — " +
+						"wait for the plugin to go idle and check what it already did, rather than retrying blind"
+					if args.Token == "" {
+						hint += ". Pass a token next time: resending it joins the original run instead of repeating its work"
+					} else {
+						hint += ". Resend the same token to join that run instead of repeating its work"
+					}
+					return nil, nil, fmt.Errorf("%w%s", err, hint)
+				}
+				return nil, nil, err
+			}
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{&mcp.TextContent{Text: string(raw)}},
+			}, nil, nil
+		})
 
 	// get_screenshot returns an image, so it can't use registerBridged.
 	mcp.AddTool(s, &mcp.Tool{
