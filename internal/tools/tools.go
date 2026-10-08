@@ -461,6 +461,35 @@ type setBoundVariableArgs struct {
 	VariableID string `json:"variable_id" jsonschema:"variable to bind to the field"`
 }
 
+type prototypeLinkItem struct {
+	NodeID        string   `json:"node_id" jsonschema:"source node that reacts, e.g. a button frame or instance"`
+	DestinationID string   `json:"destination_id,omitempty" jsonschema:"frame to go to; required for NAVIGATE, SWAP and OVERLAY, and must be omitted for BACK and CLOSE"`
+	Trigger       string   `json:"trigger,omitempty" jsonschema:"ON_CLICK (default), ON_HOVER, ON_PRESS or ON_DRAG"`
+	Navigation    string   `json:"navigation,omitempty" jsonschema:"NAVIGATE (default), SWAP, OVERLAY, BACK or CLOSE; BACK and CLOSE take no destination_id"`
+	Transition    string   `json:"transition,omitempty" jsonschema:"animation between the frames: none by default, else DISSOLVE, SMART_ANIMATE, SCROLL_ANIMATE, MOVE_IN, MOVE_OUT, PUSH, SLIDE_IN or SLIDE_OUT"`
+	Direction     string   `json:"direction,omitempty" jsonschema:"LEFT (default), RIGHT, TOP or BOTTOM; only for the directional transitions MOVE_IN, MOVE_OUT, PUSH, SLIDE_IN, SLIDE_OUT"`
+	Duration      *float64 `json:"duration,omitempty" jsonschema:"transition duration in seconds (default 0.3); ignored without a transition"`
+	Easing        string   `json:"easing,omitempty" jsonschema:"EASE_OUT (default), EASE_IN, EASE_IN_AND_OUT or LINEAR; ignored without a transition"`
+}
+
+type prototypeLinksArgs struct {
+	fileArg
+	Items   []prototypeLinkItem `json:"items" jsonschema:"prototype links to set, one per source node. Several items on the same node become its full set of reactions; the node's existing reactions are replaced"`
+	Verbose bool                `json:"verbose,omitempty" jsonschema:"return full node summaries instead of just the changed ids"`
+}
+
+type prototypeLinksReadArgs struct {
+	fileArg
+	NodeID string `json:"node_id,omitempty" jsonschema:"subtree to read reactions from (default: the page the user currently has open)"`
+}
+
+type flowStartingPointArgs struct {
+	fileArg
+	NodeID string `json:"node_id" jsonschema:"FRAME or SECTION to mark as a prototype flow's first screen"`
+	Name   string `json:"name,omitempty" jsonschema:"flow name shown in the prototype panel (default: the node's layer name)"`
+	Remove bool   `json:"remove,omitempty" jsonschema:"remove this node from the page's flow starting points instead of adding it"`
+}
+
 type screenshotArgs struct {
 	fileArg
 	NodeID       string  `json:"node_id,omitempty" jsonschema:"node to capture (default: current selection, else current page)"`
@@ -659,6 +688,19 @@ func Register(s *mcp.Server, b *bridge.Router) {
 		bridge.DefaultTimeout)
 	registerBridged[setSelectionArgs](s, b, "set_selection",
 		"Select the given nodes in Figma and scroll the viewport to show them.",
+		bridge.DefaultTimeout)
+	registerBridged[prototypeLinksArgs](s, b, "set_prototype_links",
+		"Wire prototype links (reactions) from source nodes to destination frames in one call: trigger, navigation and an optional transition. "+
+			"Each item replaces that node's existing reactions, so pass every link a node should have in the same call. "+
+			"BACK and CLOSE take no destination_id; the other navigations require one.",
+		bridge.DefaultTimeout)
+	registerBridged[prototypeLinksReadArgs](s, b, "get_prototype_links",
+		"List the prototype links in a subtree (or the open page): source node, trigger, navigation and destination. "+
+			"Use it to check wiring after set_prototype_links.",
+		bridge.DefaultTimeout)
+	registerBridged[flowStartingPointArgs](s, b, "set_flow_starting_point",
+		"Mark a frame as a prototype flow's starting point on its page, or remove it again with remove: true. "+
+			"Returns the page's full list of starting points.",
 		bridge.DefaultTimeout)
 	// run_script is registered by hand: a timed-out script keeps running in
 	// Figma, so the timeout needs to say that rather than invite a retry.
