@@ -274,13 +274,14 @@ function applyShapeParams(n, params) {
 // invariant and every call throws "proxy: inconsistent get". Scripts get the
 // real figma until there is a wrapper that survives that.
 
-// new Function wraps the body in its own header, so a reported line is two
-// ahead of the line the caller wrote.
+// Frames from the script read "at <anonymous> (<input>:6:22)". new Function
+// prepends two header lines and we add the async wrapper, so the caller's
+// line 1 is file line 4. Verified against the sandbox; a different engine
+// would only cost us the hint, since no match means no line is reported.
 function scriptLine(e) {
-  const stack = (e && e.stack) || "";
-  const m = /<anonymous>:(\d+):\d+/.exec(stack) || /Function:(\d+):\d+/.exec(stack);
+  const m = /<input>:(\d+):\d+/.exec((e && e.stack) || "");
   if (!m) return 0;
-  const n = parseInt(m[1], 10) - 2;
+  const n = parseInt(m[1], 10) - 3;
   return n > 0 ? n : 0;
 }
 
