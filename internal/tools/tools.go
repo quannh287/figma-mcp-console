@@ -25,6 +25,9 @@ const screenshotTimeout = 60 * time.Second
 // and so may legitimately churn through thousands of nodes.
 const scriptTimeout = 5 * time.Minute
 
+// maxScreenshotDimension is the largest max_dimension the plugin honours.
+const maxScreenshotDimension = 4096
+
 // downloadTimeout grows with batch size: exports run per node in the
 // plugin, so a flat cap would starve large batches. Never below the
 // screenshot timeout, capped at 5 minutes.
@@ -107,9 +110,15 @@ type createTextArgs struct {
 	ParentID      string   `json:"parent_id,omitempty" jsonschema:"node ID to append into (default: current page)"`
 }
 
+type setPageArgs struct {
+	fileArg
+	Page string `json:"page" jsonschema:"page to open: its name (case-insensitive, unique substring ok) or id, see list_pages"`
+}
+
 type findArgs struct {
 	fileArg
-	NodeID     string   `json:"node_id,omitempty" jsonschema:"subtree to search in (default: current page)"`
+	Page       string   `json:"page,omitempty" jsonschema:"search this whole page instead of the open one: name or id, see list_pages. Ignored when node_id is given"`
+	NodeID     string   `json:"node_id,omitempty" jsonschema:"subtree to search in (default: the page the user currently has open)"`
 	Name       string   `json:"name,omitempty" jsonschema:"case-insensitive substring to match against layer names"`
 	Text       string   `json:"text,omitempty" jsonschema:"case-insensitive substring to match against TEXT node content"`
 	Types      []string `json:"types,omitempty" jsonschema:"node types to include, e.g. FRAME, TEXT, COMPONENT, INSTANCE, RECTANGLE"`
@@ -450,14 +459,18 @@ type setBoundVariableArgs struct {
 
 type screenshotArgs struct {
 	fileArg
-	NodeID string  `json:"node_id,omitempty" jsonschema:"node to capture (default: current selection, else current page)"`
-	Scale  float64 `json:"scale,omitempty" jsonschema:"export scale 0.5..4 (default 1)"`
+	NodeID       string  `json:"node_id,omitempty" jsonschema:"node to capture (default: current selection, else current page)"`
+	Scale        float64 `json:"scale,omitempty" jsonschema:"export scale 0.5..4 (default 1)"`
+	MaxDimension float64 `json:"max_dimension,omitempty" jsonschema:"longest side in pixels before the scale is reduced to fit (default 2000, ceiling 4096)"`
 }
 
 type screenshotResult struct {
-	Data   string  `json:"data"`
-	Width  float64 `json:"width"`
-	Height float64 `json:"height"`
+	Data         string  `json:"data"`
+	Width        float64 `json:"width"`
+	Height       float64 `json:"height"`
+	Scale        float64 `json:"scale"`
+	Clamped      bool    `json:"clamped"`
+	SourceHeight float64 `json:"sourceHeight"`
 }
 
 // Register adds all Figma tools to the MCP server.
@@ -484,6 +497,14 @@ func Register(s *mcp.Server, b *bridge.Router) {
 		}, nil, nil
 	})
 
+	registerBridged[emptyArgs](s, b, "list_pages",
+		"List the document's pages and which one is currently open. "+
+			"Every tool except find_nodes acts on the open page, and the user can change it at any time, so check here before "+
+			"assuming where your work will land.",
+		bridge.DefaultTimeout)
+	registerBridged[setPageArgs](s, b, "set_current_page",
+		"Open a page by name or id, so subsequent create/find calls act on it. Use this instead of hoping the right page is open.",
+		bridge.DefaultTimeout)
 	registerBridged[emptyArgs](s, b, "get_metadata",
 		"Get the current Figma document: file name, current page, and a summary of the page's top-level layers.",
 		bridge.DefaultTimeout)
@@ -512,7 +533,8 @@ func Register(s *mcp.Server, b *bridge.Router) {
 		"Create a new text layer with the given content, optionally with a specific font family and style.",
 		bridge.DefaultTimeout)
 	registerBridged[findArgs](s, b, "find_nodes",
-		"Find nodes in the current page (or a subtree) by layer name, text content, node type, fill color, font size or font style. "+
+		"Find nodes by layer name, text content, node type, fill color, font size or font style, in a subtree (node_id), a named page (page), "+
+			"or whichever page is open. The result names the scope it searched — pass page or node_id when it matters, since the open page can change mid-session. "+
 			"Use this instead of walking the tree in large files, and prefer the style filters over guessing a node's role from its size. "+
 			"Feed the returned ids straight into a tool's node_ids to edit the whole match set in one call.",
 		bridge.DefaultTimeout)
@@ -551,7 +573,7 @@ func Register(s *mcp.Server, b *bridge.Router) {
 			"Layers inside an instance have derived ids of the form I<instance-id>;<source-child-id>, which find_nodes returns and every tool accepts.",
 		bridge.DefaultTimeout)
 	registerBridged[combineVariantsArgs](s, b, "combine_as_variants",
-		"Combine several COMPONENT nodes into one COMPONENT_SET (variants). "+
+		"Combine several COMPONENT nodes into one COMPONENT_SET (variants), laid out in a column and sized to fit them. "+
 			"Name each component Property=Value (e.g. \"Size=Large\") beforehand so Figma derives the variant properties from the names.",
 		bridge.DefaultTimeout)
 	registerBridged[componentPropertyArgs](s, b, "add_component_property",
@@ -657,10 +679,23 @@ func Register(s *mcp.Server, b *bridge.Router) {
 		if err != nil {
 			return nil, nil, fmt.Errorf("decode screenshot base64: %w", err)
 		}
+		note := fmt.Sprintf("%.0fx%.0f px", res.Width, res.Height)
+		if res.Clamped {
+			// A tall page squeezed to fit is unreadable; say so instead of
+			// handing back a thumbnail that looks like the real thing.
+			note += fmt.Sprintf(" — scaled to %.2fx to fit; the node is %.0f px tall, so detail is lost. ",
+				res.Scale, res.SourceHeight)
+			if args.MaxDimension >= maxScreenshotDimension {
+				// Already at the ceiling: suggesting a bigger one wastes a call.
+				note += "max_dimension is at its ceiling, so screenshot a child node instead."
+			} else {
+				note += "Screenshot a child node, or raise max_dimension, to read it."
+			}
+		}
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
 				&mcp.ImageContent{Data: png, MIMEType: "image/png"},
-				&mcp.TextContent{Text: fmt.Sprintf("%.0fx%.0f px", res.Width, res.Height)},
+				&mcp.TextContent{Text: note},
 			},
 		}, nil, nil
 	})
