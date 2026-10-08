@@ -27,9 +27,55 @@ async function node(id) {
   return n;
 }
 
+// Mutating commands accept one node_id or many node_ids so a bulk edit costs
+// one call instead of one per node.
+async function targets(params) {
+  const ids = params.node_ids && params.node_ids.length
+    ? params.node_ids
+    : params.node_id ? [params.node_id] : [];
+  if (!ids.length) throw new Error("node_id or node_ids is required");
+  const out = [];
+  for (const id of ids) out.push(await node(id));
+  return out;
+}
+
+// Result of a mutating command. Echoing a full summary per node drowns the
+// caller's context on a 50-node batch, so default to ids and let the caller
+// ask for the rest with verbose.
+function done(params, nodes, extra) {
+  const list = Array.isArray(nodes) ? nodes : [nodes];
+  const out = params.verbose
+    ? { nodes: list.map(summarize) }
+    : { ok: true, ids: list.map((n) => n.id) };
+  return Object.assign(out, extra || {});
+}
+
 // Mixed values (figma.mixed) are Symbols, which postMessage cannot clone.
 function val(x) {
   return x === figma.mixed ? "mixed" : x;
+}
+
+function rgbToHex(c) {
+  const h = (v) => ("0" + Math.round(v * 255).toString(16)).slice(-2);
+  return "#" + h(c.r) + h(c.g) + h(c.b);
+}
+
+// A full PaintObject is ~20 lines of JSON (17-digit float channels, complete
+// gradientTransform); compact callers only ever need the color.
+function paintBrief(p) {
+  if (p.visible === false) return "hidden";
+  if (p.type !== "SOLID") return p.type;
+  const hex = rgbToHex(p.color);
+  return p.opacity === undefined || p.opacity === 1 ? hex : hex + "@" + p.opacity;
+}
+
+// First visible solid fill as hex, for find_nodes' fill filter.
+function solidFillHex(n) {
+  if (!("fills" in n) || !Array.isArray(n.fills)) return null;
+  for (const p of n.fills) {
+    if (p.type === "SOLID" && p.visible !== false) return rgbToHex(p.color);
+  }
+  return null;
 }
 
 function summarize(n) {
@@ -73,16 +119,27 @@ function nodeLink(id) {
   );
 }
 
-function serialize(n, depth) {
+// compact drops defaults (visible, full opacity, empty fills) and renders
+// paints as hex: depth 1 on a 27-child frame is ~15k tokens otherwise.
+function serialize(n, depth, compact) {
   const s = summarize(n);
-  if ("visible" in n) s.visible = n.visible;
-  if ("opacity" in n) s.opacity = n.opacity;
-  if ("fills" in n && Array.isArray(n.fills)) s.fills = n.fills;
+  if (compact) {
+    for (const k of ["x", "y", "width", "height"]) {
+      if (typeof s[k] === "number") s[k] = Math.round(s[k] * 100) / 100;
+    }
+  }
+  if ("visible" in n && (!compact || !n.visible)) s.visible = n.visible;
+  if ("opacity" in n && (!compact || n.opacity !== 1)) s.opacity = n.opacity;
+  if ("fills" in n && Array.isArray(n.fills) && (!compact || n.fills.length)) {
+    s.fills = compact ? n.fills.map(paintBrief) : n.fills;
+  }
   if ("strokes" in n && n.strokes.length) {
-    s.strokes = n.strokes;
+    s.strokes = compact ? n.strokes.map(paintBrief) : n.strokes;
     s.strokeWeight = val(n.strokeWeight);
   }
-  if ("effects" in n && n.effects.length) s.effects = n.effects;
+  if ("effects" in n && n.effects.length) {
+    s.effects = compact ? n.effects.map((e) => e.type) : n.effects;
+  }
   if ("cornerRadius" in n && n.cornerRadius !== 0) s.cornerRadius = val(n.cornerRadius);
   if (n.type === "TEXT") {
     s.fontSize = val(n.fontSize);
@@ -100,7 +157,7 @@ function serialize(n, depth) {
   }
   if ("children" in n) {
     s.childCount = n.children.length;
-    if (depth > 0) s.children = n.children.map((c) => serialize(c, depth - 1));
+    if (depth > 0) s.children = n.children.map((c) => serialize(c, depth - 1, compact));
   }
   return s;
 }
@@ -175,8 +232,23 @@ function applyShapeParams(n, params) {
   n.y = params.y;
   if (params.width > 0 && params.height > 0) n.resize(params.width, params.height);
   if (params.name) n.name = params.name;
-  if (params.fill_color) n.fills = [{ type: "SOLID", color: hexToRGB(params.fill_color) }];
+  if (params.fill_color && params.fill_color !== "none") {
+    n.fills = [{ type: "SOLID", color: hexToRGB(params.fill_color) }];
+  }
 }
+
+// Optional extras find_nodes can attach per node, so callers can filter on
+// style without a get_design_context round-trip per hit.
+const FIELD_GETTERS = {
+  fills: (n) => ("fills" in n && Array.isArray(n.fills) ? n.fills.map(paintBrief) : undefined),
+  strokes: (n) => ("strokes" in n && Array.isArray(n.strokes) && n.strokes.length ? n.strokes.map(paintBrief) : undefined),
+  fontSize: (n) => (n.type === "TEXT" ? val(n.fontSize) : undefined),
+  fontName: (n) => (n.type === "TEXT" ? val(n.fontName) : undefined),
+  cornerRadius: (n) => ("cornerRadius" in n ? val(n.cornerRadius) : undefined),
+  effects: (n) => ("effects" in n && n.effects.length ? n.effects.map((e) => e.type) : undefined),
+  opacity: (n) => ("opacity" in n ? n.opacity : undefined),
+  characters: (n) => (n.type === "TEXT" ? n.characters : undefined),
+};
 
 // ---------- command handlers (names match MCP tool names) ----------
 
@@ -200,11 +272,14 @@ const handlers = {
 
   async get_design_context(params) {
     const depth = params.depth === undefined ? 2 : params.depth;
-    return serialize(await node(params.node_id), depth);
+    return serialize(await node(params.node_id), depth, !!params.compact);
   },
 
   async create_frame(params) {
     const f = figma.createFrame();
+    // Figma gives new frames an opaque white fill, which silently covers
+    // whatever sits behind a nested frame. Transparent unless asked.
+    if (!params.fill_color || params.fill_color === "none") f.fills = [];
     applyShapeParams(f, params);
     (await parentOf(params)).appendChild(f);
     return summarize(f);
@@ -283,32 +358,39 @@ const handlers = {
   },
 
   async set_characters(params) {
-    const t = await node(params.node_id);
-    if (t.type !== "TEXT") throw new Error("node " + params.node_id + " is " + t.type + ", not TEXT");
-    if (t.characters.length > 0) {
-      const fonts = t.getRangeAllFontNames(0, t.characters.length);
-      await Promise.all(fonts.map(figma.loadFontAsync));
-    } else {
-      await figma.loadFontAsync(t.fontName);
+    const nodes = await targets(params);
+    for (const t of nodes) {
+      if (t.type !== "TEXT") throw new Error("node " + t.id + " is " + t.type + ", not TEXT");
+      if (t.characters.length > 0) {
+        const fonts = t.getRangeAllFontNames(0, t.characters.length);
+        await Promise.all(fonts.map(figma.loadFontAsync));
+      } else {
+        await figma.loadFontAsync(t.fontName);
+      }
+      t.characters = params.text;
     }
-    t.characters = params.text;
-    return summarize(t);
+    return done(params, nodes);
   },
 
   async set_fills(params) {
-    const n = await node(params.node_id);
-    if (!("fills" in n)) throw new Error("node " + params.node_id + " has no fills");
-    let paint;
-    if (params.gradient) {
-      paint = buildGradient(params.gradient);
-    } else if (params.color) {
-      paint = { type: "SOLID", color: hexToRGB(params.color) };
-    } else {
-      throw new Error("set_fills needs color or gradient");
+    const nodes = await targets(params);
+    const clear = params.color === "none" || params.color === null;
+    let paint = null;
+    if (!clear) {
+      if (params.gradient) {
+        paint = buildGradient(params.gradient);
+      } else if (params.color) {
+        paint = { type: "SOLID", color: hexToRGB(params.color) };
+      } else {
+        throw new Error('set_fills needs color, gradient, or color: "none" to clear');
+      }
+      if (params.opacity !== undefined && params.opacity !== null) paint.opacity = params.opacity;
     }
-    if (params.opacity !== undefined && params.opacity !== null) paint.opacity = params.opacity;
-    n.fills = [paint];
-    return summarize(n);
+    for (const n of nodes) {
+      if (!("fills" in n)) throw new Error("node " + n.id + " has no fills");
+      n.fills = clear ? [] : [paint];
+    }
+    return done(params, nodes);
   },
 
   async move_nodes(params) {
@@ -318,9 +400,9 @@ const handlers = {
       if (!("x" in n)) throw new Error("node " + item.node_id + " cannot be moved");
       n.x = item.x;
       n.y = item.y;
-      out.push(summarize(n));
+      out.push(n);
     }
-    return out;
+    return done(params, out);
   },
 
   async resize_nodes(params) {
@@ -329,16 +411,16 @@ const handlers = {
       const n = await node(item.node_id);
       if (!("resize" in n)) throw new Error("node " + item.node_id + " cannot be resized");
       n.resize(item.width, item.height);
-      out.push(summarize(n));
+      out.push(n);
     }
-    return out;
+    return done(params, out);
   },
 
   async remove_nodes(params) {
     const deleted = [];
     for (const id of params.node_ids) {
       const n = await node(id);
-      deleted.push(summarize(n));
+      deleted.push({ id: n.id, name: n.name, type: n.type });
       n.remove();
     }
     return { deleted };
@@ -348,7 +430,7 @@ const handlers = {
     const n = await node(params.node_id);
     if (!("layoutMode" in n)) throw new Error("node " + params.node_id + " does not support auto-layout");
     n.layoutMode = params.layout_mode;
-    if (params.layout_mode === "NONE") return summarize(n);
+    if (params.layout_mode === "NONE") return done(params, n);
     if (params.item_spacing !== undefined) n.itemSpacing = params.item_spacing;
     if (params.padding !== undefined) {
       n.paddingTop = n.paddingRight = n.paddingBottom = n.paddingLeft = params.padding;
@@ -361,46 +443,97 @@ const handlers = {
     if (params.counter_axis_align) n.counterAxisAlignItems = params.counter_axis_align;
     if (params.primary_axis_sizing) n.primaryAxisSizingMode = params.primary_axis_sizing;
     if (params.counter_axis_sizing) n.counterAxisSizingMode = params.counter_axis_sizing;
-    return summarize(n);
+    return done(params, n);
   },
 
   async set_corner_radius(params) {
-    const n = await node(params.node_id);
-    if (params.radius !== undefined) {
-      if (!("cornerRadius" in n)) throw new Error("node " + params.node_id + " has no corner radius");
-      n.cornerRadius = params.radius;
+    const nodes = await targets(params);
+    for (const n of nodes) {
+      if (params.radius !== undefined) {
+        if (!("cornerRadius" in n)) throw new Error("node " + n.id + " has no corner radius");
+        n.cornerRadius = params.radius;
+      }
+      if (!("topLeftRadius" in n)) {
+        if (params.radius === undefined) throw new Error("node " + n.id + " has no per-corner radius");
+        continue;
+      }
+      if (params.top_left !== undefined) n.topLeftRadius = params.top_left;
+      if (params.top_right !== undefined) n.topRightRadius = params.top_right;
+      if (params.bottom_right !== undefined) n.bottomRightRadius = params.bottom_right;
+      if (params.bottom_left !== undefined) n.bottomLeftRadius = params.bottom_left;
     }
-    if (!("topLeftRadius" in n)) {
-      if (params.radius === undefined) throw new Error("node " + params.node_id + " has no per-corner radius");
-      return summarize(n);
-    }
-    if (params.top_left !== undefined) n.topLeftRadius = params.top_left;
-    if (params.top_right !== undefined) n.topRightRadius = params.top_right;
-    if (params.bottom_right !== undefined) n.bottomRightRadius = params.bottom_right;
-    if (params.bottom_left !== undefined) n.bottomLeftRadius = params.bottom_left;
-    return summarize(n);
+    return done(params, nodes);
   },
 
   async set_strokes(params) {
-    const n = await node(params.node_id);
-    if (!("strokes" in n)) throw new Error("node " + params.node_id + " has no strokes");
-    if (params.color) {
-      const paint = { type: "SOLID", color: hexToRGB(params.color) };
-      if (params.opacity !== undefined && params.opacity !== null) paint.opacity = params.opacity;
-      n.strokes = [paint];
-    } else {
-      n.strokes = [];
+    const nodes = await targets(params);
+    for (const n of nodes) {
+      if (!("strokes" in n)) throw new Error("node " + n.id + " has no strokes");
+      if (params.color && params.color !== "none") {
+        const paint = { type: "SOLID", color: hexToRGB(params.color) };
+        if (params.opacity !== undefined && params.opacity !== null) paint.opacity = params.opacity;
+        n.strokes = [paint];
+      } else {
+        n.strokes = [];
+      }
+      if (params.weight !== undefined && "strokeWeight" in n) n.strokeWeight = params.weight;
+      if (params.align && "strokeAlign" in n) n.strokeAlign = params.align;
     }
-    if (params.weight !== undefined && "strokeWeight" in n) n.strokeWeight = params.weight;
-    if (params.align && "strokeAlign" in n) n.strokeAlign = params.align;
-    return summarize(n);
+    return done(params, nodes);
   },
 
   async set_effects(params) {
-    const n = await node(params.node_id);
-    if (!("effects" in n)) throw new Error("node " + params.node_id + " has no effects");
-    n.effects = buildEffects(params.effects);
-    return summarize(n);
+    const nodes = await targets(params);
+    const effects = buildEffects(params.effects);
+    for (const n of nodes) {
+      if (!("effects" in n)) throw new Error("node " + n.id + " has no effects");
+      n.effects = effects;
+    }
+    return done(params, nodes);
+  },
+
+  async rename_nodes(params) {
+    const renamed = [];
+    for (const item of params.items) {
+      const n = await node(item.node_id);
+      n.name = item.name;
+      renamed.push(n);
+    }
+    return done(params, renamed);
+  },
+
+  // Restyle text in place. create_text sets the font once; variants (Bold vs
+  // Regular of the same label) need this.
+  async set_text_properties(params) {
+    const nodes = await targets(params);
+    for (const n of nodes) {
+      if (n.type !== "TEXT") throw new Error("node " + n.id + " is " + n.type + ", not TEXT");
+      // Every font already in the node must be loaded before any edit, and
+      // the new one before it can be applied.
+      const current = n.characters.length
+        ? n.getRangeAllFontNames(0, n.characters.length)
+        : [n.fontName];
+      await Promise.all(current.filter((f) => f !== figma.mixed).map(figma.loadFontAsync));
+      if (params.font_family || params.font_style) {
+        const base = current[0] === figma.mixed ? { family: "Inter", style: "Regular" } : current[0];
+        const font = {
+          family: params.font_family || base.family,
+          style: params.font_style || base.style,
+        };
+        await figma.loadFontAsync(font);
+        n.fontName = font;
+      }
+      if (params.font_size) n.fontSize = params.font_size;
+      if (params.line_height !== undefined && params.line_height !== null) {
+        n.lineHeight = { value: params.line_height, unit: "PIXELS" };
+      }
+      if (params.letter_spacing !== undefined && params.letter_spacing !== null) {
+        n.letterSpacing = { value: params.letter_spacing, unit: "PIXELS" };
+      }
+      if (params.text_align) n.textAlignHorizontal = params.text_align;
+      if (params.fill_color) n.fills = [{ type: "SOLID", color: hexToRGB(params.fill_color) }];
+    }
+    return done(params, nodes);
   },
 
   async download_assets(params) {
@@ -450,17 +583,42 @@ const handlers = {
     const name = params.name ? params.name.toLowerCase() : null;
     const text = params.text ? params.text.toLowerCase() : null;
     const types = params.types && params.types.length ? params.types : null;
+    // Style filters let callers target "every white card" directly instead of
+    // guessing a node's role from its size.
+    const fill = params.fill ? ("#" + params.fill.replace(/^#/, "")).toLowerCase() : null;
+    const fontSize = params.font_size;
+    const fontStyle = params.font_style ? params.font_style.toLowerCase() : null;
     const matches = scope.findAll((n) => {
       if (types && types.indexOf(n.type) === -1) return false;
       if (name && n.name.toLowerCase().indexOf(name) === -1) return false;
       if (text && (n.type !== "TEXT" || n.characters.toLowerCase().indexOf(text) === -1)) return false;
+      if (fill) {
+        const hex = solidFillHex(n);
+        if (!hex || hex.toLowerCase() !== fill) return false;
+      }
+      if (fontSize !== undefined && fontSize !== null) {
+        if (n.type !== "TEXT" || val(n.fontSize) !== fontSize) return false;
+      }
+      if (fontStyle) {
+        if (n.type !== "TEXT") return false;
+        const f = val(n.fontName);
+        if (f === "mixed" || f.style.toLowerCase() !== fontStyle) return false;
+      }
       return true;
     });
     const max = params.max_results || 50;
+    const fields = params.fields && params.fields.length ? params.fields : null;
     return {
       total: matches.length,
       truncated: matches.length > max,
-      nodes: matches.slice(0, max).map(summarize),
+      nodes: matches.slice(0, max).map((n) => {
+        const s = summarize(n);
+        for (const f of fields || []) {
+          const v = FIELD_GETTERS[f] ? FIELD_GETTERS[f](n) : undefined;
+          if (v !== undefined) s[f] = v;
+        }
+        return s;
+      }),
     };
   },
 
@@ -486,18 +644,27 @@ const handlers = {
   async append_children(params) {
     const parent = await node(params.parent_id);
     if (!("appendChild" in parent)) throw new Error("node " + params.parent_id + " cannot have children");
-    const out = [];
+    const moved = [];
+    const warnings = [];
     let index = params.index;
     for (const id of params.node_ids) {
       const n = await node(id);
+      // Figma silently pulls a variant out of its set and renames it
+      // "<Set>/<Variant>" — easy to miss until the variants stop working.
+      if (n.type === "COMPONENT" && n.parent && n.parent.type === "COMPONENT_SET") {
+        warnings.push(
+          "node " + n.id + " (" + n.name + ") left component set " + n.parent.name +
+          "; Figma renames detached variants to <Set>/<Variant>",
+        );
+      }
       if (index === undefined || index === null) {
         parent.appendChild(n);
       } else {
         parent.insertChild(index++, n);
       }
-      out.push(summarize(n));
+      moved.push(n);
     }
-    return out;
+    return done(params, moved, warnings.length ? { warnings } : null);
   },
 
   async clone_node(params) {
@@ -567,6 +734,55 @@ const handlers = {
     return summarize(inst);
   },
 
+  async combine_as_variants(params) {
+    const nodes = await Promise.all(params.node_ids.map(node));
+    for (const n of nodes) {
+      if (n.type !== "COMPONENT") throw new Error("node " + n.id + " is " + n.type + ", not a COMPONENT");
+    }
+    const parent = params.parent_id ? await node(params.parent_id) : nodes[0].parent;
+    const set = figma.combineAsVariants(nodes, parent);
+    if (params.name) set.name = params.name;
+    return summarize(set);
+  },
+
+  // Component properties live on the component (or set); binding the property
+  // to a child layer is what makes it editable from the instance panel, so do
+  // both in one call.
+  async add_component_property(params) {
+    const c = await node(params.component_id);
+    if (c.type !== "COMPONENT" && c.type !== "COMPONENT_SET") {
+      throw new Error("node " + c.id + " is " + c.type + ", not a COMPONENT or COMPONENT_SET");
+    }
+    const type = (params.type || "TEXT").toUpperCase();
+    // Figma requires a default of the matching kind; pick the empty one
+    // rather than failing a call that only omitted it.
+    let def = params.default_value;
+    if (def === undefined || def === null) def = type === "BOOLEAN" ? false : "";
+    const key = c.addComponentProperty(params.name, type, def);
+    if (params.bind_node_id) {
+      const t = await node(params.bind_node_id);
+      const field = type === "TEXT" ? "characters" : type === "BOOLEAN" ? "visible" : "mainComponent";
+      const refs = {};
+      for (const k in t.componentPropertyReferences || {}) refs[k] = t.componentPropertyReferences[k];
+      refs[field] = key;
+      t.componentPropertyReferences = refs;
+    }
+    return { key, name: params.name, type, boundTo: params.bind_node_id || null };
+  },
+
+  async set_instance_properties(params) {
+    const inst = await node(params.instance_id);
+    if (inst.type !== "INSTANCE") throw new Error("node " + params.instance_id + " is " + inst.type + ", not an INSTANCE");
+    const known = Object.keys(inst.componentProperties || {});
+    for (const k in params.properties) {
+      if (known.indexOf(k) === -1) {
+        throw new Error("unknown property " + k + "; this instance accepts: " + (known.join(", ") || "(none)"));
+      }
+    }
+    inst.setProperties(params.properties);
+    return { id: inst.id, properties: inst.componentProperties };
+  },
+
   async swap_component(params) {
     const inst = await node(params.instance_id);
     if (inst.type !== "INSTANCE") throw new Error("node " + params.instance_id + " is " + inst.type + ", not an INSTANCE");
@@ -627,27 +843,29 @@ const handlers = {
   },
 
   async apply_style(params) {
-    const n = await node(params.node_id);
+    const nodes = await targets(params);
     const style = await figma.getStyleByIdAsync(params.style_id);
     if (!style) throw new Error("style not found: " + params.style_id);
-    if (style.type === "PAINT") {
-      if (params.target === "stroke") {
-        await n.setStrokeStyleIdAsync(style.id);
+    if (style.type === "TEXT") await figma.loadFontAsync(style.fontName);
+    for (const n of nodes) {
+      if (style.type === "PAINT") {
+        if (params.target === "stroke") {
+          await n.setStrokeStyleIdAsync(style.id);
+        } else {
+          await n.setFillStyleIdAsync(style.id);
+        }
+      } else if (style.type === "TEXT") {
+        if (n.type !== "TEXT") throw new Error("node " + n.id + " is " + n.type + ", not TEXT");
+        await n.setTextStyleIdAsync(style.id);
+      } else if (style.type === "EFFECT") {
+        await n.setEffectStyleIdAsync(style.id);
+      } else if (style.type === "GRID") {
+        await n.setGridStyleIdAsync(style.id);
       } else {
-        await n.setFillStyleIdAsync(style.id);
+        throw new Error("unsupported style type: " + style.type);
       }
-    } else if (style.type === "TEXT") {
-      if (n.type !== "TEXT") throw new Error("node " + params.node_id + " is " + n.type + ", not TEXT");
-      await figma.loadFontAsync(style.fontName);
-      await n.setTextStyleIdAsync(style.id);
-    } else if (style.type === "EFFECT") {
-      await n.setEffectStyleIdAsync(style.id);
-    } else if (style.type === "GRID") {
-      await n.setGridStyleIdAsync(style.id);
-    } else {
-      throw new Error("unsupported style type: " + style.type);
     }
-    return summarize(n);
+    return done(params, nodes);
   },
 
   // ---------- variables (design tokens) ----------
@@ -712,18 +930,46 @@ const handlers = {
   },
 
   async set_bound_variable(params) {
-    const n = await node(params.node_id);
+    const nodes = await targets(params);
     const v = await figma.variables.getVariableByIdAsync(params.variable_id);
     if (!v) throw new Error("variable not found: " + params.variable_id);
     const field = params.field;
-    if (field === "fills" || field === "strokes") {
-      if (!(field in n)) throw new Error("node " + params.node_id + " has no " + field);
-      const paints = n[field].length ? n[field] : [{ type: "SOLID", color: { r: 0, g: 0, b: 0 } }];
-      n[field] = [figma.variables.setBoundVariableForPaint(paints[0], "color", v)].concat(paints.slice(1));
-    } else {
-      n.setBoundVariable(field, v);
+    for (const n of nodes) {
+      if (field === "fills" || field === "strokes") {
+        if (!(field in n)) throw new Error("node " + n.id + " has no " + field);
+        const paints = n[field].length ? n[field] : [{ type: "SOLID", color: { r: 0, g: 0, b: 0 } }];
+        n[field] = [figma.variables.setBoundVariableForPaint(paints[0], "color", v)].concat(paints.slice(1));
+      } else {
+        n.setBoundVariable(field, v);
+      }
     }
-    return summarize(n);
+    return done(params, nodes);
+  },
+
+  // Escape hatch for bulk work: one call instead of hundreds of atomic ones.
+  // Figma's plugin sandbox may refuse dynamic code entirely; when it does, say
+  // so plainly rather than failing with a bare ReferenceError.
+  async run_script(params) {
+    if (typeof params.code !== "string" || !params.code.trim()) throw new Error("code is required");
+    const helpers = { node, summarize, serialize, hexToRGB, rgbToHex, paintBrief, solidFillHex };
+    let fn;
+    try {
+      fn = new Function("figma", "helpers", '"use strict"; return (async () => {\n' + params.code + "\n})();");
+    } catch (e) {
+      throw new Error(
+        "the Figma plugin sandbox rejected dynamic code (" + String((e && e.message) || e) +
+        "); use the atomic tools instead",
+      );
+    }
+    const result = await fn(figma, helpers);
+    if (result === undefined) return null;
+    // The reply is structured-cloned to the UI; a live node would kill the
+    // connection, so force plain data here and fail with a clear message.
+    try {
+      return JSON.parse(JSON.stringify(result));
+    } catch (e) {
+      throw new Error("script must return plain data (ids, numbers, strings, arrays), not Figma objects");
+    }
   },
 
   async get_screenshot(params) {
