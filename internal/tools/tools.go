@@ -179,7 +179,7 @@ type instancePropertiesArgs struct {
 
 type runScriptArgs struct {
 	fileArg
-	Token string `json:"token,omitempty" jsonschema:"an id you choose for this run, e.g. \"build-cards-1\". A timed-out script keeps running in Figma, so resending the same token joins that run and returns its result instead of doing the work twice. Always set it for scripts that create nodes"`
+	Token string `json:"token,omitempty" jsonschema:"an id you choose for this run, e.g. \"build-cards-1\". A script that times out or loses the connection keeps running in Figma, so resending the same token returns that run\\'s result instead of doing the work twice. The memory lives in the plugin window and the last 20 runs, so it is lost if the plugin is reloaded. Always set it for scripts that create nodes"`
 	Code  string `json:"code" jsonschema:"JavaScript body executed in the Figma plugin sandbox. figma is in scope, await is allowed, and the value you return becomes the tool result. Return plain data only (ids, numbers, strings, arrays), never Figma node objects"`
 }
 
@@ -674,12 +674,20 @@ func Register(s *mcp.Server, b *bridge.Router) {
 		func(ctx context.Context, req *mcp.CallToolRequest, args runScriptArgs) (*mcp.CallToolResult, any, error) {
 			raw, err := b.Call(ctx, args.File, "run_script", args, scriptTimeout)
 			if err != nil {
-				if strings.Contains(err.Error(), "did not answer") {
-					hint := "; Figma cannot abort a running script, so this one is probably still going — " +
-						"wait for the plugin to go idle and check what it already did, rather than retrying blind"
-					if args.Token == "" {
-						hint += ". Pass a token next time: resending it joins the original run instead of repeating its work"
-					} else {
+				// Both a timeout and a lost connection leave the script running
+				// in Figma, so the work may already be done. Saying so is the
+				// difference between a safe retry and duplicated work.
+				msg := err.Error()
+				timedOut := strings.Contains(msg, "did not answer")
+				dropped := strings.Contains(msg, "disconnected")
+				if timedOut || dropped {
+					hint := "; Figma cannot abort a running script, so it may have finished anyway — check what it already created before doing anything else"
+					switch {
+					case args.Token == "":
+						hint += ". Pass a token next time: resending it returns the original run's result instead of repeating its work"
+					case dropped:
+						hint += ". Resending the token joins that run, but only while the plugin stays open — a reloaded plugin forgets, so verify the document first"
+					default:
 						hint += ". Resend the same token to join that run instead of repeating its work"
 					}
 					return nil, nil, fmt.Errorf("%w%s", err, hint)
