@@ -406,14 +406,19 @@ async function buildReaction(item) {
   if (needsDestination && !item.destination_id) {
     throw new Error("destination_id is required for " + navigation + "; only BACK and CLOSE take none");
   }
+  // BACK and CLOSE are action types of their own, not navigations of a NODE
+  // action; sending them as a navigation fails validation.
+  if (!needsDestination) {
+    return { trigger: { type: trigger }, actions: [{ type: navigation }] };
+  }
   // Resolve the destination here so a stale id fails by name, not as an
   // opaque setReactionsAsync rejection.
-  if (needsDestination) await node(item.destination_id);
+  await node(item.destination_id);
   return {
     trigger: { type: trigger },
     actions: [{
       type: "NODE",
-      destinationId: needsDestination ? item.destination_id : null,
+      destinationId: item.destination_id,
       navigation,
       transition: buildTransition(item),
       preserveScrollPosition: false,

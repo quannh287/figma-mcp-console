@@ -692,7 +692,8 @@ func Register(s *mcp.Server, b *bridge.Router) {
 	registerBridged[prototypeLinksArgs](s, b, "set_prototype_links",
 		"Wire prototype links (reactions) from source nodes to destination frames in one call: trigger, navigation and an optional transition. "+
 			"Each item replaces that node's existing reactions, so pass every link a node should have in the same call. "+
-			"BACK and CLOSE take no destination_id; the other navigations require one.",
+			"BACK and CLOSE take no destination_id; the other navigations require one. "+
+			"Figma only accepts prototype links between top-level frames on the same page — a frame nested inside another is rejected.",
 		bridge.DefaultTimeout)
 	registerBridged[prototypeLinksReadArgs](s, b, "get_prototype_links",
 		"List the prototype links in a subtree (or the open page): source node, trigger, navigation and destination. "+
