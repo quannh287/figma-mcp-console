@@ -268,35 +268,11 @@ function applyShapeParams(n, params) {
   }
 }
 
-// figma.* calls that bring a new node into the document. A script that throws
-// halfway leaves these behind, and the caller has no way to find them.
-const CREATORS = [
-  "createFrame", "createRectangle", "createEllipse", "createText", "createLine",
-  "createPolygon", "createStar", "createVector", "createSlice", "createPage",
-  "createComponent", "createComponentFromNode", "createNodeFromSvg", "createSticky",
-  "group", "flatten", "union", "subtract", "intersect", "exclude", "combineAsVariants",
-];
-
-// A figma facade that records what the script creates. node.clone() cannot be
-// intercepted this way, so clones are not tracked — see the tool description.
-function trackingFigma(created) {
-  try {
-    return new Proxy(figma, {
-      get(target, prop) {
-        const v = target[prop];
-        if (typeof v !== "function") return v;
-        if (CREATORS.indexOf(prop) === -1) return v.bind(target);
-        return function () {
-          const out = v.apply(target, arguments);
-          if (out && typeof out === "object" && out.id) created.push(out.id);
-          return out;
-        };
-      },
-    });
-  } catch (e) {
-    return figma; // host object refused proxying; tracking is best-effort
-  }
-}
+// Tracking the nodes a script creates needs a wrapper around figma, but the
+// host object's properties are non-configurable and non-writable, so a Proxy
+// get trap that returns anything else (even a bound copy) breaks the Proxy
+// invariant and every call throws "proxy: inconsistent get". Scripts get the
+// real figma until there is a wrapper that survives that.
 
 // new Function wraps the body in its own header, so a reported line is two
 // ahead of the line the caller wrote.
@@ -308,7 +284,7 @@ function scriptLine(e) {
   return n > 0 ? n : 0;
 }
 
-function scriptFailure(e, created, rollback) {
+function scriptFailure(e) {
   let msg = String((e && e.message) || e);
   // Plan limits read like API errors; say what they actually mean.
   if (/Limited to \d+ mode/i.test(msg)) {
@@ -316,20 +292,7 @@ function scriptFailure(e, created, rollback) {
   }
   const line = scriptLine(e);
   if (line) msg += " [script line " + line + "]";
-  if (!created.length) return msg;
-  if (rollback) {
-    let removed = 0;
-    for (let i = created.length - 1; i >= 0; i--) {
-      try {
-        const n = figma.getNodeById(created[i]);
-        if (n && !n.removed) { n.remove(); removed++; }
-      } catch (err) {}
-    }
-    return msg + " — rolled back " + removed + " of " + created.length + " node(s) created before the failure";
-  }
-  const shown = created.slice(0, 20).join(", ") + (created.length > 20 ? " (+" + (created.length - 20) + " more)" : "");
-  return msg + " — left behind " + created.length + " node(s): " + shown +
-    "; pass rollback_on_error to delete them automatically";
+  return msg;
 }
 
 // Optional extras find_nodes can attach per node, so callers can filter on
@@ -1075,8 +1038,7 @@ const handlers = {
   async run_script(params) {
     if (typeof params.code !== "string" || !params.code.trim()) throw new Error("code is required");
 
-    const created = [];
-    const figmaApi = trackingFigma(created);
+    const figmaApi = figma;
     const helpers = {
       node, summarize, serialize, hexToRGB, rgbToHex, paintBrief, solidFillHex,
       // The Plugin API has no createAutoLayout; scripts written against other
@@ -1106,10 +1068,9 @@ const handlers = {
     try {
       result = await fn(figmaApi, helpers);
     } catch (e) {
-      throw new Error(scriptFailure(e, created, !!params.rollback_on_error));
+      throw new Error(scriptFailure(e));
     }
-    // Knowing how much a script touched is most of what callers check for.
-    if (result === undefined) return { ok: true, created: created.length };
+    if (result === undefined) return { ok: true };
     // The reply is structured-cloned to the UI; a live node would kill the
     // connection, so force plain data here and fail with a clear message.
     try {

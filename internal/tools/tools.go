@@ -176,8 +176,7 @@ type instancePropertiesArgs struct {
 
 type runScriptArgs struct {
 	fileArg
-	Code            string `json:"code" jsonschema:"JavaScript body executed in the Figma plugin sandbox. figma is in scope, await is allowed, and the value you return becomes the tool result. Return plain data only (ids, numbers, strings, arrays), never Figma node objects"`
-	RollbackOnError bool   `json:"rollback_on_error,omitempty" jsonschema:"delete the nodes the script created if it throws, instead of leaving them half-built. Clones made with node.clone() are not tracked"`
+	Code string `json:"code" jsonschema:"JavaScript body executed in the Figma plugin sandbox. figma is in scope, await is allowed, and the value you return becomes the tool result. Return plain data only (ids, numbers, strings, arrays), never Figma node objects"`
 }
 
 type groupArgs struct {
@@ -663,7 +662,7 @@ func Register(s *mcp.Server, b *bridge.Router) {
 			"and createAutoLayout(direction, props) exists only as helpers.createAutoLayout. "+
 			"The file is opened with dynamic-page access, so the sync accessors throw — use setFillStyleIdAsync, setStrokeStyleIdAsync, "+
 			"setTextStyleIdAsync, setEffectStyleIdAsync, getMainComponentAsync, getNodeByIdAsync and loadAllPagesAsync. "+
-			"On failure the error names the script line and the nodes already created; pass rollback_on_error to delete them. "+
+			"On failure the error names the script line; a script that throws partway leaves what it already created in the document, so collect ids as you go if you may need to undo. "+
 			"Prefer the atomic tools for single edits: they give precise errors, while a failed script can leave the document half-changed.",
 		scriptTimeout)
 
