@@ -712,7 +712,15 @@ func Register(s *mcp.Server, b *bridge.Router) {
 		"and createAutoLayout(direction, props) exists only as helpers.createAutoLayout. " +
 		"The file is opened with dynamic-page access, so the sync accessors throw — use setFillStyleIdAsync, setStrokeStyleIdAsync, " +
 		"setTextStyleIdAsync, setEffectStyleIdAsync, getMainComponentAsync, getNodeByIdAsync and loadAllPagesAsync. " +
-		"On failure the error names the script line; a script that throws partway leaves what it already created in the document, so collect ids as you go if you may need to undo. " +
+		"On failure the error names the script line, and whatever the script already created stays in the document. " +
+		"Nothing can abort a running script, so a call that times out keeps going and keeps writing — including any cleanup in its own catch block, " +
+		"which can delete work done after the timeout. Set a token so a retry joins the original run; without one, wait for the plugin to go idle and " +
+		"inspect the document rather than redoing the work. " +
+		"Nothing persists between scripts, and globalThis does not survive a plugin reload, so define any helpers inside each script. " +
+		"A bound paint still carries its own colour, which is what renders wherever the variable cannot resolve, so seed it from " +
+		"variable.resolveForConsumer(node).value rather than black. " +
+		"Look nodes up by id rather than running findAll over a whole section: one findAll across ~130 large frames timed out at five minutes, " +
+		"while the same work done per node took seconds. " +
 		"Prefer the atomic tools for single edits: they give precise errors, while a failed script can leave the document half-changed."},
 		func(ctx context.Context, req *mcp.CallToolRequest, args runScriptArgs) (*mcp.CallToolResult, any, error) {
 			raw, err := b.Call(ctx, args.File, "run_script", args, scriptTimeout)
@@ -724,7 +732,9 @@ func Register(s *mcp.Server, b *bridge.Router) {
 				timedOut := strings.Contains(msg, "did not answer")
 				dropped := strings.Contains(msg, "disconnected")
 				if timedOut || dropped {
-					hint := "; Figma cannot abort a running script, so it may have finished anyway — check what it already created before doing anything else"
+					hint := "; Figma cannot abort a running script, so this one is still running and can keep changing the document — " +
+						"including the cleanup in its own catch block, which may delete work you do in the meantime. " +
+						"Do not redo its work or edit the same nodes until the plugin is idle"
 					switch {
 					case args.Token == "":
 						hint += ". Pass a token next time: resending it returns the original run's result instead of repeating its work"
