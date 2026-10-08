@@ -363,6 +363,77 @@ async function runScriptBody(params) {
   }
 }
 
+// ---------- prototyping ----------
+
+const TRIGGERS = ["ON_CLICK", "ON_HOVER", "ON_PRESS", "ON_DRAG"];
+const NAVIGATIONS = ["NAVIGATE", "SWAP", "OVERLAY", "BACK", "CLOSE"];
+// Directional transitions carry a direction; the rest only easing/duration.
+const DIRECTIONAL_TRANSITIONS = ["MOVE_IN", "MOVE_OUT", "PUSH", "SLIDE_IN", "SLIDE_OUT"];
+const SIMPLE_TRANSITIONS = ["DISSOLVE", "SMART_ANIMATE", "SCROLL_ANIMATE"];
+
+function buildTransition(item) {
+  const type = (item.transition || "").toUpperCase();
+  if (!type || type === "NONE" || type === "INSTANT") return null;
+  const directional = DIRECTIONAL_TRANSITIONS.indexOf(type) !== -1;
+  if (!directional && SIMPLE_TRANSITIONS.indexOf(type) === -1) {
+    throw new Error(
+      "unsupported transition: " + type + " (use " +
+      SIMPLE_TRANSITIONS.concat(DIRECTIONAL_TRANSITIONS).join(", ") + ")",
+    );
+  }
+  const t = {
+    type,
+    easing: { type: (item.easing || "EASE_OUT").toUpperCase() },
+    duration: item.duration === undefined || item.duration === null ? 0.3 : item.duration,
+  };
+  if (directional) {
+    t.direction = (item.direction || "LEFT").toUpperCase();
+    t.matchLayers = false;
+  }
+  return t;
+}
+
+async function buildReaction(item) {
+  const trigger = (item.trigger || "ON_CLICK").toUpperCase();
+  if (TRIGGERS.indexOf(trigger) === -1) {
+    throw new Error("unsupported trigger: " + trigger + " (use " + TRIGGERS.join(", ") + ")");
+  }
+  const navigation = (item.navigation || "NAVIGATE").toUpperCase();
+  if (NAVIGATIONS.indexOf(navigation) === -1) {
+    throw new Error("unsupported navigation: " + navigation + " (use " + NAVIGATIONS.join(", ") + ")");
+  }
+  const needsDestination = navigation !== "BACK" && navigation !== "CLOSE";
+  if (needsDestination && !item.destination_id) {
+    throw new Error("destination_id is required for " + navigation + "; only BACK and CLOSE take none");
+  }
+  // BACK and CLOSE are action types of their own, not navigations of a NODE
+  // action; sending them as a navigation fails validation.
+  if (!needsDestination) {
+    return { trigger: { type: trigger }, actions: [{ type: navigation }] };
+  }
+  // Resolve the destination here so a stale id fails by name, not as an
+  // opaque setReactionsAsync rejection.
+  await node(item.destination_id);
+  return {
+    trigger: { type: trigger },
+    actions: [{
+      type: "NODE",
+      destinationId: item.destination_id,
+      navigation,
+      transition: buildTransition(item),
+      preserveScrollPosition: false,
+    }],
+  };
+}
+
+// The page owning a node; flowStartingPoints lives on the page, which is not
+// necessarily the open one.
+function pageOf(n) {
+  while (n && n.type !== "PAGE") n = n.parent;
+  if (!n) throw new Error("node is not on a page");
+  return n;
+}
+
 // ---------- command handlers (names match MCP tool names) ----------
 
 const handlers = {
@@ -1085,6 +1156,93 @@ const handlers = {
       }
     }
     return done(params, nodes);
+  },
+
+  // ---------- prototyping ----------
+
+  // setReactionsAsync replaces a node's reactions wholesale, so items for the
+  // same node are grouped and written once instead of overwriting each other.
+  async set_prototype_links(params) {
+    const items = params.items || [];
+    if (!items.length) throw new Error("items is required");
+    const order = [];
+    const groups = {};
+    for (const item of items) {
+      if (!item.node_id) throw new Error("node_id is required for every item");
+      if (!groups[item.node_id]) {
+        groups[item.node_id] = [];
+        order.push(item.node_id);
+      }
+      groups[item.node_id].push(await buildReaction(item));
+    }
+    const out = [];
+    for (const id of order) {
+      const n = await node(id);
+      if (!("setReactionsAsync" in n)) {
+        throw new Error("node " + id + " is " + n.type + " and cannot carry prototype reactions");
+      }
+      await n.setReactionsAsync(groups[id]);
+      out.push(n);
+    }
+    return done(params, out);
+  },
+
+  async get_prototype_links(params) {
+    const scope = params.node_id ? await node(params.node_id) : figma.currentPage;
+    const withReactions = [];
+    const has = (n) => "reactions" in n && n.reactions && n.reactions.length;
+    if (has(scope)) withReactions.push(scope);
+    if ("findAll" in scope) withReactions.push(...scope.findAll(has));
+    const names = {};
+    const nameOf = async (id) => {
+      if (!(id in names)) {
+        const d = await figma.getNodeByIdAsync(id);
+        names[id] = d ? d.name : null;
+      }
+      return names[id];
+    };
+    const links = [];
+    for (const n of withReactions) {
+      for (const r of n.reactions) {
+        for (const a of r.actions || []) {
+          const link = { id: n.id, name: n.name, trigger: r.trigger ? r.trigger.type : null, action: a.type };
+          if (a.navigation) link.navigation = a.navigation;
+          if (a.url) link.url = a.url;
+          if (a.destinationId) {
+            link.destinationId = a.destinationId;
+            const dn = await nameOf(a.destinationId);
+            if (dn) link.destinationName = dn;
+          }
+          if (a.transition) link.transition = a.transition.type;
+          links.push(link);
+        }
+      }
+    }
+    return {
+      scope: scope.type === "PAGE" ? "page " + scope.name : scope.name,
+      total: links.length,
+      links,
+    };
+  },
+
+  // flowStartingPoints is a page-level array, so read-modify-write it.
+  async set_flow_starting_point(params) {
+    const n = await node(params.node_id);
+    const page = pageOf(n);
+    const kept = page.flowStartingPoints.filter((p) => p.nodeId !== n.id);
+    const changed = params.remove
+      ? kept.length !== page.flowStartingPoints.length
+      : true;
+    page.flowStartingPoints = params.remove
+      ? kept
+      : kept.concat([{ nodeId: n.id, name: params.name || n.name }]);
+    return {
+      ok: true,
+      id: n.id,
+      page: page.name,
+      changed,
+      flowStartingPoints: page.flowStartingPoints.map((p) => ({ nodeId: p.nodeId, name: p.name })),
+    };
   },
 
   // Escape hatch for bulk work: one call instead of hundreds of atomic ones.
