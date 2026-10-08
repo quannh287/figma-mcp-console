@@ -433,6 +433,22 @@ func (b *Bridge) CallFile(ctx context.Context, file, command string, params any,
 		return nil, ctx.Err()
 	case <-timer.C:
 		unregister()
+		// A plugin runs one command at a time on Figma's main thread, so with
+		// several sessions driving it a timeout usually means queueing rather
+		// than a hang. Say which it was, so the caller knows a retry helps.
+		b.mu.Lock()
+		inflight := 0
+		for _, p := range b.pending {
+			if p.connID == pc.id {
+				inflight++
+			}
+		}
+		b.mu.Unlock()
+		if inflight > 0 {
+			return nil, fmt.Errorf("figma plugin %q did not answer %q within %s; %d other command(s) are still in flight to it, "+
+				"so it is busy rather than stuck — retry, or run fewer sessions against this file at once",
+				pc.label(), command, timeout, inflight)
+		}
 		return nil, fmt.Errorf("figma plugin %q did not answer %q within %s", pc.label(), command, timeout)
 	}
 }

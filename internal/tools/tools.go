@@ -19,7 +19,10 @@ import (
 	"github.com/hoangann2000/figma-mcp-console/internal/bridge"
 )
 
-const screenshotTimeout = 60 * time.Second
+// screenshotTimeout also has to cover the wait behind other sessions driving
+// the same plugin: exporting a tall frame is slow, and Figma runs one command
+// at a time.
+const screenshotTimeout = 150 * time.Second
 
 // scriptTimeout covers run_script, which exists to replace hundreds of calls
 // and so may legitimately churn through thousands of nodes.
