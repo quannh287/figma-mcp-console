@@ -28,6 +28,7 @@ These cost real debugging time; the handlers now absorb them.
 - **Set bounds update lazily.** Reading `width`/`height` right after moving children returns the old value; re-read in a later call.
 - **The sandbox has no filesystem or network.** Anything touching either belongs in the Go server — see `download_assets`, `import_image`, `get_screenshot`.
 - **Instance children have derived ids** of the form `I<instance-id>;<source-child-id>`. Tools accept them.
+- **`clone()` escapes a SECTION.** Cloning a node whose parent is a section puts the copy on the page at 0,0, not beside the original, despite what the docs say about inheriting the parent. Pass an explicit parent and position.
 - **`figma` cannot be wrapped.** Its properties are non-configurable and non-writable, so a Proxy `get` trap may not return anything but the original value — returning even `fn.bind(figma)` makes every call throw `proxy: inconsistent get`. A plain object is no better: `for…in figma` yields no keys, so there is nothing to copy. This rules out observing calls from the outside, which is why a failed `run_script` cannot clean up after itself.
 - **`addComponentProperty` with `INSTANCE_SWAP`** wants the component's node id. Its published key is rejected with "Property value is incompatible with component property type".
 

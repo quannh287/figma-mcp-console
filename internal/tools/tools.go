@@ -556,7 +556,9 @@ func Register(s *mcp.Server, b *bridge.Router) {
 			"Moving a variant out of its COMPONENT_SET detaches it and Figma renames it to <Set>/<Variant>; the result reports that as a warning.",
 		bridge.DefaultTimeout)
 	registerBridged[cloneArgs](s, b, "clone_node",
-		"Clone a node, optionally repositioning the copy or appending it to a different parent.",
+		"Clone a node, optionally repositioning the copy or appending it to a different parent. "+
+			"Figma drops the copy of a node that lives in a SECTION onto the page at 0,0 instead of beside the original, "+
+			"so pass parent_id and x/y when cloning inside a section.",
 		bridge.DefaultTimeout)
 	registerBridged[listFontsArgs](s, b, "list_available_fonts",
 		"List font families (and their styles) available in Figma, optionally filtered by family name substring.",
