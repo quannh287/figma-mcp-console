@@ -21,6 +21,13 @@ import (
 
 const screenshotTimeout = 60 * time.Second
 
+// scriptTimeout covers run_script, which exists to replace hundreds of calls
+// and so may legitimately churn through thousands of nodes.
+const scriptTimeout = 5 * time.Minute
+
+// maxScreenshotDimension is the largest max_dimension the plugin honours.
+const maxScreenshotDimension = 4096
+
 // downloadTimeout grows with batch size: exports run per node in the
 // plugin, so a flat cap would starve large batches. Never below the
 // screenshot timeout, capped at 5 minutes.
@@ -59,10 +66,20 @@ func registerBridged[In fileTargeted](s *mcp.Server, b *bridge.Router, name, des
 
 type emptyArgs struct{ fileArg }
 
+// nodeTarget is the shared shape of every tool that mutates existing nodes:
+// one node or many in a single call, and a compact result by default so a
+// 50-node batch does not bury the caller in echoed summaries.
+type nodeTarget struct {
+	NodeID  string   `json:"node_id,omitempty" jsonschema:"target node ID; use node_ids to apply the same change to many nodes at once"`
+	NodeIDs []string `json:"node_ids,omitempty" jsonschema:"target node IDs, applied in one call (preferred over repeating the tool per node)"`
+	Verbose bool     `json:"verbose,omitempty" jsonschema:"return full node summaries instead of just the changed ids"`
+}
+
 type nodeInfoArgs struct {
 	fileArg
-	NodeID string `json:"node_id" jsonschema:"Figma node ID, e.g. \"12:34\""`
-	Depth  int    `json:"depth,omitempty" jsonschema:"how many levels of children to include (default 2)"`
+	NodeID  string `json:"node_id" jsonschema:"Figma node ID, e.g. \"12:34\""`
+	Depth   int    `json:"depth,omitempty" jsonschema:"how many levels of children to include (default 2)"`
+	Compact bool   `json:"compact,omitempty" jsonschema:"colors as hex and defaults omitted; use this first, the full form costs several thousand tokens per frame"`
 }
 
 type createShapeArgs struct {
@@ -72,7 +89,7 @@ type createShapeArgs struct {
 	Y         float64 `json:"y" jsonschema:"y position in the parent's coordinates"`
 	Width     float64 `json:"width" jsonschema:"width in pixels"`
 	Height    float64 `json:"height" jsonschema:"height in pixels"`
-	FillColor string  `json:"fill_color,omitempty" jsonschema:"solid fill as hex, e.g. #1E90FF"`
+	FillColor string  `json:"fill_color,omitempty" jsonschema:"solid fill as hex, e.g. #1E90FF, or \"none\" for no fill. Frames are transparent unless a color is given"`
 	ParentID  string  `json:"parent_id,omitempty" jsonschema:"node ID to append into (default: current page)"`
 }
 
@@ -93,13 +110,73 @@ type createTextArgs struct {
 	ParentID      string   `json:"parent_id,omitempty" jsonschema:"node ID to append into (default: current page)"`
 }
 
+type setPageArgs struct {
+	fileArg
+	Page string `json:"page" jsonschema:"page to open: its name (case-insensitive, unique substring ok) or id, see list_pages"`
+}
+
 type findArgs struct {
 	fileArg
-	NodeID     string   `json:"node_id,omitempty" jsonschema:"subtree to search in (default: current page)"`
+	Page       string   `json:"page,omitempty" jsonschema:"search this whole page instead of the open one: name or id, see list_pages. Ignored when node_id is given"`
+	NodeID     string   `json:"node_id,omitempty" jsonschema:"subtree to search in (default: the page the user currently has open)"`
 	Name       string   `json:"name,omitempty" jsonschema:"case-insensitive substring to match against layer names"`
 	Text       string   `json:"text,omitempty" jsonschema:"case-insensitive substring to match against TEXT node content"`
 	Types      []string `json:"types,omitempty" jsonschema:"node types to include, e.g. FRAME, TEXT, COMPONENT, INSTANCE, RECTANGLE"`
+	Fill       string   `json:"fill,omitempty" jsonschema:"keep only nodes whose first visible solid fill is this hex, e.g. #FFFFFF"`
+	FontSize   *float64 `json:"font_size,omitempty" jsonschema:"keep only TEXT nodes with this font size"`
+	FontStyle  string   `json:"font_style,omitempty" jsonschema:"keep only TEXT nodes with this font style, e.g. Bold"`
+	Fields     []string `json:"fields,omitempty" jsonschema:"extra properties to return per node: fills, strokes, fontSize, fontName, cornerRadius, effects, opacity, characters"`
 	MaxResults int      `json:"max_results,omitempty" jsonschema:"maximum nodes to return (default 50)"`
+}
+
+type renameItem struct {
+	NodeID string `json:"node_id" jsonschema:"node to rename"`
+	Name   string `json:"name" jsonschema:"new layer name"`
+}
+
+type renameArgs struct {
+	fileArg
+	Items   []renameItem `json:"items" jsonschema:"nodes to rename with their new names"`
+	Verbose bool         `json:"verbose,omitempty" jsonschema:"return full node summaries instead of just the changed ids"`
+}
+
+type textPropertiesArgs struct {
+	fileArg
+	nodeTarget
+	FontFamily    string   `json:"font_family,omitempty" jsonschema:"font family, e.g. Roboto; check with list_available_fonts"`
+	FontStyle     string   `json:"font_style,omitempty" jsonschema:"font style, e.g. Bold, Medium, Italic"`
+	FontSize      float64  `json:"font_size,omitempty" jsonschema:"font size in pixels"`
+	LineHeight    *float64 `json:"line_height,omitempty" jsonschema:"line height in pixels"`
+	LetterSpacing *float64 `json:"letter_spacing,omitempty" jsonschema:"letter spacing in pixels (may be negative)"`
+	TextAlign     string   `json:"text_align,omitempty" jsonschema:"LEFT, CENTER, RIGHT, or JUSTIFIED"`
+	FillColor     string   `json:"fill_color,omitempty" jsonschema:"text color as hex, e.g. #111111"`
+}
+
+type combineVariantsArgs struct {
+	fileArg
+	NodeIDs  []string `json:"node_ids" jsonschema:"COMPONENT nodes to combine into one variant set"`
+	Name     string   `json:"name,omitempty" jsonschema:"name for the component set"`
+	ParentID string   `json:"parent_id,omitempty" jsonschema:"parent for the set (default: the first component's parent)"`
+}
+
+type componentPropertyArgs struct {
+	fileArg
+	ComponentID  string `json:"component_id" jsonschema:"COMPONENT or COMPONENT_SET to add the property to"`
+	Name         string `json:"name" jsonschema:"property name as it appears in the instance panel, e.g. Label"`
+	Type         string `json:"type,omitempty" jsonschema:"TEXT (default), BOOLEAN, or INSTANCE_SWAP"`
+	DefaultValue any    `json:"default_value,omitempty" jsonschema:"default: a string for TEXT, true/false for BOOLEAN, a component key for INSTANCE_SWAP"`
+	BindNodeID   string `json:"bind_node_id,omitempty" jsonschema:"child layer to drive with this property (its text for TEXT, visibility for BOOLEAN, swap target for INSTANCE_SWAP). Without it the property exists but controls nothing"`
+}
+
+type instancePropertiesArgs struct {
+	fileArg
+	InstanceID string         `json:"instance_id" jsonschema:"INSTANCE node to update"`
+	Properties map[string]any `json:"properties" jsonschema:"property name to value. Variant properties use the plain name (Size), TEXT/BOOLEAN/INSTANCE_SWAP use the full key returned by add_component_property (Label#12:3)"`
+}
+
+type runScriptArgs struct {
+	fileArg
+	Code string `json:"code" jsonschema:"JavaScript body executed in the Figma plugin sandbox. figma is in scope, await is allowed, and the value you return becomes the tool result. Return plain data only (ids, numbers, strings, arrays), never Figma node objects"`
 }
 
 type groupArgs struct {
@@ -118,6 +195,7 @@ type appendChildrenArgs struct {
 	ParentID string   `json:"parent_id" jsonschema:"new parent node ID (frame, group, section or page)"`
 	NodeIDs  []string `json:"node_ids" jsonschema:"nodes to move into the new parent"`
 	Index    *int     `json:"index,omitempty" jsonschema:"insert position among the parent's children (default: append at the end)"`
+	Verbose  bool     `json:"verbose,omitempty" jsonschema:"return full node summaries instead of just the moved ids"`
 }
 
 type cloneArgs struct {
@@ -137,8 +215,8 @@ type listFontsArgs struct {
 
 type setTextArgs struct {
 	fileArg
-	NodeID string `json:"node_id" jsonschema:"ID of a TEXT node"`
-	Text   string `json:"text" jsonschema:"new text content"`
+	nodeTarget
+	Text string `json:"text" jsonschema:"new text content"`
 }
 
 type gradientStop struct {
@@ -155,8 +233,8 @@ type gradientSpec struct {
 
 type setFillArgs struct {
 	fileArg
-	NodeID   string        `json:"node_id" jsonschema:"target node ID"`
-	Color    string        `json:"color,omitempty" jsonschema:"solid fill as hex, e.g. #FF5733 (omit when using gradient)"`
+	nodeTarget
+	Color    string        `json:"color,omitempty" jsonschema:"solid fill as hex, e.g. #FF5733, or \"none\" to remove all fills (omit when using gradient)"`
 	Gradient *gradientSpec `json:"gradient,omitempty" jsonschema:"gradient fill instead of a solid color"`
 	Opacity  *float64      `json:"opacity,omitempty" jsonschema:"fill opacity 0..1 (default 1)"`
 }
@@ -194,7 +272,8 @@ type moveItem struct {
 
 type moveArgs struct {
 	fileArg
-	Items []moveItem `json:"items" jsonschema:"nodes to move with their new positions"`
+	Items   []moveItem `json:"items" jsonschema:"nodes to move with their new positions"`
+	Verbose bool       `json:"verbose,omitempty" jsonschema:"return full node summaries instead of just the changed ids"`
 }
 
 type resizeItem struct {
@@ -205,7 +284,8 @@ type resizeItem struct {
 
 type resizeArgs struct {
 	fileArg
-	Items []resizeItem `json:"items" jsonschema:"nodes to resize with their new sizes"`
+	Items   []resizeItem `json:"items" jsonschema:"nodes to resize with their new sizes"`
+	Verbose bool         `json:"verbose,omitempty" jsonschema:"return full node summaries instead of just the changed ids"`
 }
 
 type deleteArgs struct {
@@ -227,11 +307,12 @@ type autoLayoutArgs struct {
 	CounterAxisAlign  string   `json:"counter_axis_align,omitempty" jsonschema:"MIN, CENTER, MAX, or BASELINE"`
 	PrimaryAxisSizing string   `json:"primary_axis_sizing,omitempty" jsonschema:"FIXED or AUTO (hug contents)"`
 	CounterAxisSizing string   `json:"counter_axis_sizing,omitempty" jsonschema:"FIXED or AUTO (hug contents)"`
+	Verbose           bool     `json:"verbose,omitempty" jsonschema:"return the full node summary instead of just the id"`
 }
 
 type cornerRadiusArgs struct {
 	fileArg
-	NodeID      string   `json:"node_id" jsonschema:"target node ID"`
+	nodeTarget
 	Radius      *float64 `json:"radius,omitempty" jsonschema:"uniform radius for all corners"`
 	TopLeft     *float64 `json:"top_left,omitempty" jsonschema:"top-left corner radius"`
 	TopRight    *float64 `json:"top_right,omitempty" jsonschema:"top-right corner radius"`
@@ -241,8 +322,8 @@ type cornerRadiusArgs struct {
 
 type strokesArgs struct {
 	fileArg
-	NodeID  string   `json:"node_id" jsonschema:"target node ID"`
-	Color   string   `json:"color,omitempty" jsonschema:"solid stroke color as hex, e.g. #333333; omit to remove all strokes"`
+	nodeTarget
+	Color   string   `json:"color,omitempty" jsonschema:"solid stroke color as hex, e.g. #333333; omit or \"none\" to remove all strokes"`
 	Weight  *float64 `json:"weight,omitempty" jsonschema:"stroke thickness in pixels"`
 	Opacity *float64 `json:"opacity,omitempty" jsonschema:"stroke opacity 0..1 (default 1)"`
 	Align   string   `json:"align,omitempty" jsonschema:"INSIDE, OUTSIDE, or CENTER"`
@@ -260,7 +341,7 @@ type effectSpec struct {
 
 type effectsArgs struct {
 	fileArg
-	NodeID  string       `json:"node_id" jsonschema:"target node ID"`
+	nodeTarget
 	Effects []effectSpec `json:"effects" jsonschema:"effects to set, replacing existing ones; empty list removes all effects"`
 }
 
@@ -337,7 +418,7 @@ type effectStyleArgs struct {
 
 type applyStyleArgs struct {
 	fileArg
-	NodeID  string `json:"node_id" jsonschema:"target node ID"`
+	nodeTarget
 	StyleID string `json:"style_id" jsonschema:"style ID from get_local_styles or a create_*_style result"`
 	Target  string `json:"target,omitempty" jsonschema:"for PAINT styles: fill (default) or stroke"`
 }
@@ -371,21 +452,25 @@ type setVariableValueArgs struct {
 
 type setBoundVariableArgs struct {
 	fileArg
-	NodeID     string `json:"node_id" jsonschema:"target node ID"`
+	nodeTarget
 	Field      string `json:"field" jsonschema:"node field to bind: fills, strokes, width, height, opacity, cornerRadius, itemSpacing, ..."`
 	VariableID string `json:"variable_id" jsonschema:"variable to bind to the field"`
 }
 
 type screenshotArgs struct {
 	fileArg
-	NodeID string  `json:"node_id,omitempty" jsonschema:"node to capture (default: current selection, else current page)"`
-	Scale  float64 `json:"scale,omitempty" jsonschema:"export scale 0.5..4 (default 1)"`
+	NodeID       string  `json:"node_id,omitempty" jsonschema:"node to capture (default: current selection, else current page)"`
+	Scale        float64 `json:"scale,omitempty" jsonschema:"export scale 0.5..4 (default 1)"`
+	MaxDimension float64 `json:"max_dimension,omitempty" jsonschema:"longest side in pixels before the scale is reduced to fit (default 2000, ceiling 4096)"`
 }
 
 type screenshotResult struct {
-	Data   string  `json:"data"`
-	Width  float64 `json:"width"`
-	Height float64 `json:"height"`
+	Data         string  `json:"data"`
+	Width        float64 `json:"width"`
+	Height       float64 `json:"height"`
+	Scale        float64 `json:"scale"`
+	Clamped      bool    `json:"clamped"`
+	SourceHeight float64 `json:"sourceHeight"`
 }
 
 // Register adds all Figma tools to the MCP server.
@@ -412,6 +497,14 @@ func Register(s *mcp.Server, b *bridge.Router) {
 		}, nil, nil
 	})
 
+	registerBridged[emptyArgs](s, b, "list_pages",
+		"List the document's pages and which one is currently open. "+
+			"Every tool except find_nodes acts on the open page, and the user can change it at any time, so check here before "+
+			"assuming where your work will land.",
+		bridge.DefaultTimeout)
+	registerBridged[setPageArgs](s, b, "set_current_page",
+		"Open a page by name or id, so subsequent create/find calls act on it. Use this instead of hoping the right page is open.",
+		bridge.DefaultTimeout)
 	registerBridged[emptyArgs](s, b, "get_metadata",
 		"Get the current Figma document: file name, current page, and a summary of the page's top-level layers.",
 		bridge.DefaultTimeout)
@@ -421,7 +514,8 @@ func Register(s *mcp.Server, b *bridge.Router) {
 			"so selecting several frames returns their names paired with links.",
 		bridge.DefaultTimeout)
 	registerBridged[nodeInfoArgs](s, b, "get_design_context",
-		"Get detailed information about a node (geometry, fills, text content) including its children up to the given depth.",
+		"Get detailed information about a node (geometry, fills, text content) including its children up to the given depth. "+
+			"Pass compact: true unless you need raw paint objects — the full form runs to several thousand tokens for one frame.",
 		bridge.DefaultTimeout)
 	registerBridged[createShapeArgs](s, b, "create_frame",
 		"Create a new frame at the given position and size. Returns the created node's summary including its id.",
@@ -439,8 +533,17 @@ func Register(s *mcp.Server, b *bridge.Router) {
 		"Create a new text layer with the given content, optionally with a specific font family and style.",
 		bridge.DefaultTimeout)
 	registerBridged[findArgs](s, b, "find_nodes",
-		"Find nodes in the current page (or a subtree) by layer name, text content and/or node type. "+
-			"Use this instead of walking the tree in large files.",
+		"Find nodes by layer name, text content, node type, fill color, font size or font style, in a subtree (node_id), a named page (page), "+
+			"or whichever page is open. The result names the scope it searched — pass page or node_id when it matters, since the open page can change mid-session. "+
+			"Use this instead of walking the tree in large files, and prefer the style filters over guessing a node's role from its size. "+
+			"Feed the returned ids straight into a tool's node_ids to edit the whole match set in one call.",
+		bridge.DefaultTimeout)
+	registerBridged[renameArgs](s, b, "rename_nodes",
+		"Rename one or more layers in place. Use this rather than clone_node plus remove_nodes, which breaks every existing instance of a component.",
+		bridge.DefaultTimeout)
+	registerBridged[textPropertiesArgs](s, b, "set_text_properties",
+		"Change the font family, style, size, line height, letter spacing, alignment or color of existing TEXT nodes. "+
+			"This is the only way to restyle text after create_text, e.g. to toggle a label between Regular and Bold for a variant.",
 		bridge.DefaultTimeout)
 	registerBridged[groupArgs](s, b, "group_nodes",
 		"Group the given nodes into a new GROUP in the first node's parent.",
@@ -449,7 +552,8 @@ func Register(s *mcp.Server, b *bridge.Router) {
 		"Ungroup GROUP or FRAME nodes, releasing their children into the parent.",
 		bridge.DefaultTimeout)
 	registerBridged[appendChildrenArgs](s, b, "append_children",
-		"Move nodes into a different parent (reparent), optionally at a specific child index.",
+		"Move nodes into a different parent (reparent), optionally at a specific child index. "+
+			"Moving a variant out of its COMPONENT_SET detaches it and Figma renames it to <Set>/<Variant>; the result reports that as a warning.",
 		bridge.DefaultTimeout)
 	registerBridged[cloneArgs](s, b, "clone_node",
 		"Clone a node, optionally repositioning the copy or appending it to a different parent.",
@@ -465,7 +569,20 @@ func Register(s *mcp.Server, b *bridge.Router) {
 		"List all local COMPONENT and COMPONENT_SET nodes in the file, across all pages.",
 		screenshotTimeout)
 	registerBridged[createInstanceArgs](s, b, "create_instance",
-		"Create an instance of a COMPONENT at the given position.",
+		"Create an instance of a COMPONENT at the given position. "+
+			"Layers inside an instance have derived ids of the form I<instance-id>;<source-child-id>, which find_nodes returns and every tool accepts.",
+		bridge.DefaultTimeout)
+	registerBridged[combineVariantsArgs](s, b, "combine_as_variants",
+		"Combine several COMPONENT nodes into one COMPONENT_SET (variants), laid out in a column and sized to fit them. "+
+			"Name each component Property=Value (e.g. \"Size=Large\") beforehand so Figma derives the variant properties from the names.",
+		bridge.DefaultTimeout)
+	registerBridged[componentPropertyArgs](s, b, "add_component_property",
+		"Add a TEXT, BOOLEAN or INSTANCE_SWAP property to a component or component set, and optionally bind it to a child layer "+
+			"so the property actually drives that layer. Returns the property key needed by set_instance_properties.",
+		bridge.DefaultTimeout)
+	registerBridged[instancePropertiesArgs](s, b, "set_instance_properties",
+		"Set variant and component property values on an INSTANCE (e.g. switch it to the Large variant, or override its label text). "+
+			"An unknown key fails with the list of keys the instance accepts.",
 		bridge.DefaultTimeout)
 	registerBridged[swapComponentArgs](s, b, "swap_component",
 		"Swap an INSTANCE to a different COMPONENT, keeping applicable overrides.",
@@ -510,13 +627,14 @@ func Register(s *mcp.Server, b *bridge.Router) {
 		"Replace the text content (characters) of an existing TEXT node.",
 		bridge.DefaultTimeout)
 	registerBridged[setFillArgs](s, b, "set_fills",
-		"Set a solid color (hex) or a linear/radial gradient fill on a node.",
+		"Set a solid color (hex) or a linear/radial gradient fill on one or many nodes, or remove their fills with color: \"none\".",
 		bridge.DefaultTimeout)
 	registerBridged[moveArgs](s, b, "move_nodes",
 		"Move one or more nodes to new x/y positions within their parents.",
 		bridge.DefaultTimeout)
 	registerBridged[resizeArgs](s, b, "resize_nodes",
-		"Resize one or more nodes to the given widths and heights.",
+		"Resize one or more nodes to the given widths and heights. "+
+			"Children only follow if they have constraints or auto-layout; inside a plain frame or component you must reposition them yourself with move_nodes.",
 		bridge.DefaultTimeout)
 	registerBridged[deleteArgs](s, b, "remove_nodes",
 		"Remove (delete) one or more nodes from the document.",
@@ -536,6 +654,12 @@ func Register(s *mcp.Server, b *bridge.Router) {
 	registerBridged[setSelectionArgs](s, b, "set_selection",
 		"Select the given nodes in Figma and scroll the viewport to show them.",
 		bridge.DefaultTimeout)
+	registerBridged[runScriptArgs](s, b, "run_script",
+		"Run a JavaScript body against the Figma Plugin API in one call — the escape hatch for bulk work that would otherwise cost "+
+			"hundreds of atomic calls, such as binding a variable to every white fill in a subtree. "+
+			"figma is in scope, await is allowed, and the returned value (plain data only) becomes the result. "+
+			"Prefer the atomic tools for single edits: they give precise errors, while a failed script can leave the document half-changed.",
+		scriptTimeout)
 
 	// get_screenshot returns an image, so it can't use registerBridged.
 	mcp.AddTool(s, &mcp.Tool{
@@ -555,10 +679,23 @@ func Register(s *mcp.Server, b *bridge.Router) {
 		if err != nil {
 			return nil, nil, fmt.Errorf("decode screenshot base64: %w", err)
 		}
+		note := fmt.Sprintf("%.0fx%.0f px", res.Width, res.Height)
+		if res.Clamped {
+			// A tall page squeezed to fit is unreadable; say so instead of
+			// handing back a thumbnail that looks like the real thing.
+			note += fmt.Sprintf(" — scaled to %.2fx to fit; the node is %.0f px tall, so detail is lost. ",
+				res.Scale, res.SourceHeight)
+			if args.MaxDimension >= maxScreenshotDimension {
+				// Already at the ceiling: suggesting a bigger one wastes a call.
+				note += "max_dimension is at its ceiling, so screenshot a child node instead."
+			} else {
+				note += "Screenshot a child node, or raise max_dimension, to read it."
+			}
+		}
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
 				&mcp.ImageContent{Data: png, MIMEType: "image/png"},
-				&mcp.TextContent{Text: fmt.Sprintf("%.0fx%.0f px", res.Width, res.Height)},
+				&mcp.TextContent{Text: note},
 			},
 		}, nil, nil
 	})
