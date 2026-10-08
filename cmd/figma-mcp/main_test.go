@@ -58,8 +58,8 @@ func TestEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list tools: %v", err)
 	}
-	if n := len(tools.Tools); n != 44 {
-		t.Errorf("want 44 tools, got %d", n)
+	if n := len(tools.Tools); n != 50 {
+		t.Errorf("want 50 tools, got %d", n)
 	}
 
 	// Before the plugin connects: friendly error, not a timeout. The bridge
