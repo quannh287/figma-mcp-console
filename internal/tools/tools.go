@@ -164,7 +164,7 @@ type componentPropertyArgs struct {
 	ComponentID  string `json:"component_id" jsonschema:"COMPONENT or COMPONENT_SET to add the property to"`
 	Name         string `json:"name" jsonschema:"property name as it appears in the instance panel, e.g. Label"`
 	Type         string `json:"type,omitempty" jsonschema:"TEXT (default), BOOLEAN, or INSTANCE_SWAP"`
-	DefaultValue any    `json:"default_value,omitempty" jsonschema:"default: a string for TEXT, true/false for BOOLEAN, a component key for INSTANCE_SWAP"`
+	DefaultValue any    `json:"default_value,omitempty" jsonschema:"default: a string for TEXT, true/false for BOOLEAN, and for INSTANCE_SWAP the COMPONENT's node id such as \"1:908\" (its published key is rejected)"`
 	BindNodeID   string `json:"bind_node_id,omitempty" jsonschema:"child layer to drive with this property (its text for TEXT, visibility for BOOLEAN, swap target for INSTANCE_SWAP). Without it the property exists but controls nothing"`
 }
 
