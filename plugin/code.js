@@ -2,7 +2,7 @@
 // Receives {id, command, params} from the Go bridge (relayed through ui.html),
 // executes it against the Figma Plugin API, and replies {id, result|error}.
 
-figma.showUI(__html__, { width: 300, height: 132 });
+figma.showUI(__html__, { width: 280, height: 104 });
 
 // Tell the UI which file this plugin window runs in; the UI forwards it to
 // the bridge on every (re)connect so calls can be routed per file when
@@ -266,6 +266,34 @@ function applyShapeParams(n, params) {
   if (params.fill_color && params.fill_color !== "none") {
     n.fills = [{ type: "SOLID", color: hexToRGB(params.fill_color) }];
   }
+}
+
+// Tracking the nodes a script creates needs a wrapper around figma, but the
+// host object's properties are non-configurable and non-writable, so a Proxy
+// get trap that returns anything else (even a bound copy) breaks the Proxy
+// invariant and every call throws "proxy: inconsistent get". Scripts get the
+// real figma until there is a wrapper that survives that.
+
+// Frames from the script read "at <anonymous> (<input>:6:22)". new Function
+// prepends two header lines and we add the async wrapper, so the caller's
+// line 1 is file line 4. Verified against the sandbox; a different engine
+// would only cost us the hint, since no match means no line is reported.
+function scriptLine(e) {
+  const m = /<input>:(\d+):\d+/.exec((e && e.stack) || "");
+  if (!m) return 0;
+  const n = parseInt(m[1], 10) - 3;
+  return n > 0 ? n : 0;
+}
+
+function scriptFailure(e) {
+  let msg = String((e && e.message) || e);
+  // Plan limits read like API errors; say what they actually mean.
+  if (/Limited to \d+ mode/i.test(msg)) {
+    msg += " (Figma plan limit on modes per collection — split the tokens across separate collections)";
+  }
+  const line = scriptLine(e);
+  if (line) msg += " [script line " + line + "]";
+  return msg;
 }
 
 // Optional extras find_nodes can attach per node, so callers can filter on
@@ -1010,7 +1038,23 @@ const handlers = {
   // so plainly rather than failing with a bare ReferenceError.
   async run_script(params) {
     if (typeof params.code !== "string" || !params.code.trim()) throw new Error("code is required");
-    const helpers = { node, summarize, serialize, hexToRGB, rgbToHex, paintBrief, solidFillHex };
+
+    const figmaApi = figma;
+    const helpers = {
+      node, summarize, serialize, hexToRGB, rgbToHex, paintBrief, solidFillHex,
+      // The Plugin API has no createAutoLayout; scripts written against other
+      // Figma tooling reach for it and fail on "not a function".
+      createAutoLayout(direction, props) {
+        const f = figmaApi.createFrame();
+        f.layoutMode = String(direction || "VERTICAL").toUpperCase() === "HORIZONTAL" ? "HORIZONTAL" : "VERTICAL";
+        f.primaryAxisSizingMode = "AUTO";
+        f.counterAxisSizingMode = "AUTO";
+        f.fills = [];
+        if (props) for (const k in props) f[k] = props[k];
+        return f;
+      },
+    };
+
     let fn;
     try {
       fn = new Function("figma", "helpers", '"use strict"; return (async () => {\n' + params.code + "\n})();");
@@ -1020,8 +1064,14 @@ const handlers = {
         "); use the atomic tools instead",
       );
     }
-    const result = await fn(figma, helpers);
-    if (result === undefined) return null;
+
+    let result;
+    try {
+      result = await fn(figmaApi, helpers);
+    } catch (e) {
+      throw new Error(scriptFailure(e));
+    }
+    if (result === undefined) return { ok: true };
     // The reply is structured-cloned to the UI; a live node would kill the
     // connection, so force plain data here and fail with a clear message.
     try {
@@ -1096,9 +1146,9 @@ async function postSelection() {
   // (the list scrolls beyond that).
   const rows = Math.min(items.length, 6);
   const h = items.length
-    ? 162 + (items.length > 1 ? 22 : 0) + (needsKey ? 64 : 0) + rows * 30
-    : 132;
-  figma.ui.resize(300, h);
+    ? 134 + (items.length > 1 ? 22 : 0) + (needsKey ? 64 : 0) + rows * 30
+    : 104;
+  figma.ui.resize(280, h);
 }
 figma.on("selectionchange", postSelection);
 postSelection();
