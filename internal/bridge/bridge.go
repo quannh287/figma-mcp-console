@@ -135,6 +135,7 @@ type Bridge struct {
 	nextConn atomic.Uint64
 	nextID   atomic.Uint64
 	project  string
+	version  string
 	port     int
 }
 
@@ -148,6 +149,10 @@ func New() *Bridge {
 // SetProject names the project of the owning session; it is shown in the
 // plugin UI status line.
 func (b *Bridge) SetProject(name string) { b.project = name }
+
+// SetVersion names the server build; the plugin shows it so a stale binary
+// is visible without digging through logs.
+func (b *Bridge) SetVersion(v string) { b.version = v }
 
 // listen binds the bridge port on loopback. Both IPv4 (127.0.0.1) and IPv6
 // (::1) are bound: the plugin connects to ws://localhost, and on macOS
@@ -226,7 +231,7 @@ func (b *Bridge) handlePlugin(w http.ResponseWriter, r *http.Request) {
 	// status line; the plugin answers with a register frame naming its file.
 	// protocol lets the plugin flag itself as outdated against a newer server.
 	_ = pc.write(context.Background(), map[string]any{
-		"hello": map[string]any{"project": b.project, "port": b.port, "protocol": ProtocolVersion},
+		"hello": map[string]any{"project": b.project, "port": b.port, "protocol": ProtocolVersion, "version": b.version},
 	})
 
 	// Keepalive runs alongside the read loop and stops when it returns (the
