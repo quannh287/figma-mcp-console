@@ -676,8 +676,8 @@ func Register(s *mcp.Server, b *bridge.Router) {
 		"Nothing persists between scripts, and globalThis does not survive a plugin reload, so define any helpers inside each script. " +
 		"A bound paint still carries its own colour, which is what renders wherever the variable cannot resolve, so seed it from " +
 		"variable.resolveForConsumer(node).value rather than black. " +
-		"Look nodes up by id rather than running findAll over a whole section: one findAll across ~130 large frames timed out at five minutes, "+
-		"while the same work done per node took seconds. "+
+		"Look nodes up by id rather than running findAll over a whole section: one findAll across ~130 large frames timed out at five minutes, " +
+		"while the same work done per node took seconds. " +
 		"Prefer the atomic tools for single edits: they give precise errors, while a failed script can leave the document half-changed."},
 		func(ctx context.Context, req *mcp.CallToolRequest, args runScriptArgs) (*mcp.CallToolResult, any, error) {
 			raw, err := b.Call(ctx, args.File, "run_script", args, scriptTimeout)
