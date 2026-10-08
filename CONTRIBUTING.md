@@ -20,11 +20,35 @@ claude mcp remove figma-console
 claude mcp add figma-console -- /tmp/figma-mcp
 ```
 
-Then in Figma Desktop: **Plugins → Development → Import plugin from manifest…** → pick `plugin/manifest.json` from your checkout (once), and run **Plugins → Development → Figma MCP Console**. Keep the window open; a green dot means it reached the bridge.
-
-Restart your MCP client after changing its config, and close/reopen the plugin window after rebuilding the server — the old process owns port 2000 until it exits.
+Then in Figma Desktop: **Plugins → Development → Import plugin from manifest…** → pick `plugin/manifest.json` **from your checkout**, and run **Plugins → Development → Figma MCP Console**. Keep the window open; a green dot means it reached the bridge.
 
 Exported assets are written relative to the server's working directory, which is wherever your client launched it.
+
+### Import from the checkout, not from a copy
+
+Figma loads the plugin from **the folder you imported**, and remembers that path. If you imported the release `plugin.zip` or ran `npx figma-mcp-console install-plugin`, Figma is reading a *copy* (e.g. `~/Desktop/plugin`) and your edits in `plugin/` change nothing — the symptom is `unknown command: <your new tool>`, which looks exactly like a missing feature.
+
+The path Figma is actually using is printed under the plugin's name in **Plugins → Development**. If it is not your checkout, re-import from `plugin/manifest.json`, or copy `code.js`, `ui.html` and `manifest.json` over after every edit.
+
+### Applying a change
+
+| You changed | What to do |
+|---|---|
+| `plugin/*.js`, `plugin/*.html` | Close the plugin window and run it again. No build step — Figma reads the files as they are, but only when the window opens. There is no hot reload. |
+| Go server | `go build` again, then make your MCP client restart the server (restart the client). |
+
+### The old server keeps the bridge
+
+Only one process owns port 2000, and the server you just rebuilt is not it until the previous one exits. Every MCP client session spawns its own server, so a second editor or an older session can be holding the bridge with a stale build. The plugin then reports a protocol mismatch even though you just updated it.
+
+```sh
+lsof -nP -iTCP:2000 -sTCP:LISTEN   # which process owns the bridge
+ps -o pid,ppid,lstart,command -p <pid>   # and which client started it
+```
+
+Kill that process (or quit the client that owns it) and the next server takes over within about a second; plugins reconnect on their own.
+
+The status line names the side that is behind — "Server outdated" means update the server, "Plugin outdated" means re-import the plugin. Bump `bridge.ProtocolVersion` and `PROTOCOL` in `plugin/ui.html` together whenever you add or change commands, so that message stays truthful.
 
 ## Architecture in one paragraph
 
