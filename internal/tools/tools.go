@@ -674,6 +674,8 @@ func Register(s *mcp.Server, b *bridge.Router) {
 		"which can delete work done after the timeout. Set a token so a retry joins the original run; without one, wait for the plugin to go idle and " +
 		"inspect the document rather than redoing the work. " +
 		"Nothing persists between scripts, and globalThis does not survive a plugin reload, so define any helpers inside each script. " +
+		"A bound paint still carries its own colour, which is what renders wherever the variable cannot resolve, so seed it from " +
+		"variable.resolveForConsumer(node).value rather than black. " +
 		"Prefer the atomic tools for single edits: they give precise errors, while a failed script can leave the document half-changed."},
 		func(ctx context.Context, req *mcp.CallToolRequest, args runScriptArgs) (*mcp.CallToolResult, any, error) {
 			raw, err := b.Call(ctx, args.File, "run_script", args, scriptTimeout)
