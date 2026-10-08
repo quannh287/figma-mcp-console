@@ -25,6 +25,9 @@ const screenshotTimeout = 60 * time.Second
 // and so may legitimately churn through thousands of nodes.
 const scriptTimeout = 5 * time.Minute
 
+// maxScreenshotDimension is the largest max_dimension the plugin honours.
+const maxScreenshotDimension = 4096
+
 // downloadTimeout grows with batch size: exports run per node in the
 // plugin, so a flat cap would starve large batches. Never below the
 // screenshot timeout, capped at 5 minutes.
@@ -458,7 +461,7 @@ type screenshotArgs struct {
 	fileArg
 	NodeID       string  `json:"node_id,omitempty" jsonschema:"node to capture (default: current selection, else current page)"`
 	Scale        float64 `json:"scale,omitempty" jsonschema:"export scale 0.5..4 (default 1)"`
-	MaxDimension float64 `json:"max_dimension,omitempty" jsonschema:"longest side in pixels before the scale is reduced to fit (default 2000, max 4096)"`
+	MaxDimension float64 `json:"max_dimension,omitempty" jsonschema:"longest side in pixels before the scale is reduced to fit (default 2000, ceiling 4096)"`
 }
 
 type screenshotResult struct {
@@ -680,8 +683,14 @@ func Register(s *mcp.Server, b *bridge.Router) {
 		if res.Clamped {
 			// A tall page squeezed to fit is unreadable; say so instead of
 			// handing back a thumbnail that looks like the real thing.
-			note += fmt.Sprintf(" — scaled to %.2fx to fit; the node is %.0f px tall, so detail is lost. "+
-				"Screenshot a child node, or raise max_dimension, to read it.", res.Scale, res.SourceHeight)
+			note += fmt.Sprintf(" — scaled to %.2fx to fit; the node is %.0f px tall, so detail is lost. ",
+				res.Scale, res.SourceHeight)
+			if args.MaxDimension >= maxScreenshotDimension {
+				// Already at the ceiling: suggesting a bigger one wastes a call.
+				note += "max_dimension is at its ceiling, so screenshot a child node instead."
+			} else {
+				note += "Screenshot a child node, or raise max_dimension, to read it."
+			}
 		}
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{

@@ -24,31 +24,17 @@ Then in Figma Desktop: **Plugins → Development → Import plugin from manifest
 
 Exported assets are written relative to the server's working directory, which is wherever your client launched it.
 
-### Import from the checkout, not from a copy
+### Reloading after an edit
 
-Figma loads the plugin from **the folder you imported**, and remembers that path. If you imported the release `plugin.zip` or ran `npx figma-mcp-console install-plugin`, Figma is reading a *copy* (e.g. `~/Desktop/plugin`) and your edits in `plugin/` change nothing — the symptom is `unknown command: <your new tool>`, which looks exactly like a missing feature.
+- **Plugin files**: close the plugin window and run it again. No build step, and no hot reload — Figma only reads the files when the window opens.
+- **Go server**: `go build`, then restart your MCP client so it respawns the server.
 
-The path Figma is actually using is printed under the plugin's name in **Plugins → Development**. If it is not your checkout, re-import from `plugin/manifest.json`, or copy `code.js`, `ui.html` and `manifest.json` over after every edit.
+### Four things that will confuse you once
 
-### Applying a change
-
-| You changed | What to do |
-|---|---|
-| `plugin/*.js`, `plugin/*.html` | Close the plugin window and run it again. No build step — Figma reads the files as they are, but only when the window opens. There is no hot reload. |
-| Go server | `go build` again, then make your MCP client restart the server (restart the client). |
-
-### The old server keeps the bridge
-
-Only one process owns port 2000, and the server you just rebuilt is not it until the previous one exits. Every MCP client session spawns its own server, so a second editor or an older session can be holding the bridge with a stale build. The plugin then reports a protocol mismatch even though you just updated it.
-
-```sh
-lsof -nP -iTCP:2000 -sTCP:LISTEN   # which process owns the bridge
-ps -o pid,ppid,lstart,command -p <pid>   # and which client started it
-```
-
-Kill that process (or quit the client that owns it) and the next server takes over within about a second; plugins reconnect on their own.
-
-The status line names the side that is behind — "Server outdated" means update the server, "Plugin outdated" means re-import the plugin. Bump `bridge.ProtocolVersion` and `PROTOCOL` in `plugin/ui.html` together whenever you add or change commands, so that message stays truthful.
+- **Figma loads the plugin from the folder you imported**, shown under its name in **Plugins → Development**. Import the release zip or `install-plugin` and you are editing a copy that Figma never reads — the symptom is `unknown command: <your new tool>`, which looks like a missing feature.
+- **One process owns port 2000.** Another editor or an older session can be holding the bridge with a stale build, so your rebuilt server is idle and the plugin reports a protocol mismatch. Find it with `lsof -nP -iTCP:2000 -sTCP:LISTEN`; kill it and the next server takes over in about a second.
+- **The status line names the side that is behind** — "Server outdated" vs "Plugin outdated". Keep it truthful by bumping `bridge.ProtocolVersion` and `PROTOCOL` in `plugin/ui.html` together whenever you add or change commands.
+- **stdin is the MCP transport.** Running the server with no stdin (background job, `nohup`) makes it read EOF and exit at once, looking like a crash. To drive it by hand: `tail -f /dev/null | ./figma-mcp`. Keep one such server alive while testing, or the plugin flips between `Connected` and `Searching for MCP server…` as short-lived servers come and go.
 
 ## Architecture in one paragraph
 
