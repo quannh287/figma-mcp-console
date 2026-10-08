@@ -164,7 +164,7 @@ type componentPropertyArgs struct {
 	ComponentID  string `json:"component_id" jsonschema:"COMPONENT or COMPONENT_SET to add the property to"`
 	Name         string `json:"name" jsonschema:"property name as it appears in the instance panel, e.g. Label"`
 	Type         string `json:"type,omitempty" jsonschema:"TEXT (default), BOOLEAN, or INSTANCE_SWAP"`
-	DefaultValue any    `json:"default_value,omitempty" jsonschema:"default: a string for TEXT, true/false for BOOLEAN, a component key for INSTANCE_SWAP"`
+	DefaultValue any    `json:"default_value,omitempty" jsonschema:"default: a string for TEXT, true/false for BOOLEAN, and for INSTANCE_SWAP the COMPONENT's node id such as \"1:908\" (its published key is rejected)"`
 	BindNodeID   string `json:"bind_node_id,omitempty" jsonschema:"child layer to drive with this property (its text for TEXT, visibility for BOOLEAN, swap target for INSTANCE_SWAP). Without it the property exists but controls nothing"`
 }
 
@@ -657,7 +657,12 @@ func Register(s *mcp.Server, b *bridge.Router) {
 	registerBridged[runScriptArgs](s, b, "run_script",
 		"Run a JavaScript body against the Figma Plugin API in one call — the escape hatch for bulk work that would otherwise cost "+
 			"hundreds of atomic calls, such as binding a variable to every white fill in a subtree. "+
-			"figma is in scope, await is allowed, and the returned value (plain data only) becomes the result. "+
+			"figma is in scope, await is allowed, and the returned value (plain data only) becomes the result; return nothing and you get a count of what was created. "+
+			"This is the real Figma Plugin API, not another tool's sandbox: there is no node.query(), node.set() or node.screenshot(), "+
+			"and createAutoLayout(direction, props) exists only as helpers.createAutoLayout. "+
+			"The file is opened with dynamic-page access, so the sync accessors throw — use setFillStyleIdAsync, setStrokeStyleIdAsync, "+
+			"setTextStyleIdAsync, setEffectStyleIdAsync, getMainComponentAsync, getNodeByIdAsync and loadAllPagesAsync. "+
+			"On failure the error names the script line; a script that throws partway leaves what it already created in the document, so collect ids as you go if you may need to undo. "+
 			"Prefer the atomic tools for single edits: they give precise errors, while a failed script can leave the document half-changed.",
 		scriptTimeout)
 
