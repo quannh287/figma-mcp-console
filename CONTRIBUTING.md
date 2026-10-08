@@ -2,6 +2,8 @@
 
 Thanks for helping out. This project is a Go MCP server plus a Figma plugin that talk over a local WebSocket bridge — if you can run Figma Desktop and `go test`, you can work on it.
 
+For *why* the non-obvious parts look the way they do, see [docs/design-notes.md](docs/design-notes.md).
+
 ## Prerequisites
 
 - **Go** 1.26+ (`go version`)

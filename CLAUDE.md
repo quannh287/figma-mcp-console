@@ -20,6 +20,8 @@ go run ./cmd/figma-mcp -port 2001   # or FIGMA_MCP_PORT
 
 There is no root `package.json` and no Makefile. The npm package lives in `npm/` only.
 
+Contributor setup, the reload/bridge gotchas and the checklist for adding a tool live in `CONTRIBUTING.md`; the reasoning behind the non-obvious tools is in `docs/design-notes.md`.
+
 ## Architecture
 
 Three processes, one hop each: **MCP client → Go server (stdio) → WebSocket bridge → Figma plugin (JS sandbox)**.
