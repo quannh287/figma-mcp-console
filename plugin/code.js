@@ -27,6 +27,37 @@ async function node(id) {
   return n;
 }
 
+// Pages are addressed by id or name. With documentAccess "dynamic-page" a
+// page's children are unreachable until it is loaded, so load it here.
+async function resolvePage(ref) {
+  const want = String(ref);
+  const lower = want.toLowerCase();
+  const pages = figma.root.children;
+  const p =
+    pages.find((x) => x.id === want) ||
+    pages.find((x) => x.name.toLowerCase() === lower) ||
+    pages.find((x) => x.name.toLowerCase().indexOf(lower) !== -1);
+  if (!p) throw new Error("page not found: " + ref + " (see list_pages)");
+  await p.loadAsync();
+  return p;
+}
+
+// Figma stacks newly combined variants on top of each other and never grows
+// the set to fit them, so the extras are invisible and clipped. Lay them out.
+function arrangeVariants(set) {
+  if (set.layoutMode && set.layoutMode !== "NONE") return;
+  const gap = 32;
+  let y = 0;
+  let w = 0;
+  for (const v of set.children) {
+    v.x = 0;
+    v.y = y;
+    y += v.height + gap;
+    w = Math.max(w, v.width);
+  }
+  if (y > 0) set.resize(Math.max(w, 1), Math.max(y - gap, 1));
+}
+
 // Mutating commands accept one node_id or many node_ids so a bulk edit costs
 // one call instead of one per node.
 async function targets(params) {
@@ -135,7 +166,7 @@ function serialize(n, depth, compact) {
   }
   if ("strokes" in n && n.strokes.length) {
     s.strokes = compact ? n.strokes.map(paintBrief) : n.strokes;
-    s.strokeWeight = val(n.strokeWeight);
+    if (!compact || val(n.strokeWeight) !== 1) s.strokeWeight = val(n.strokeWeight);
   }
   if ("effects" in n && n.effects.length) {
     s.effects = compact ? n.effects.map((e) => e.type) : n.effects;
@@ -155,7 +186,7 @@ function serialize(n, depth, compact) {
     s.primaryAxisAlignItems = n.primaryAxisAlignItems;
     s.counterAxisAlignItems = n.counterAxisAlignItems;
   }
-  if ("children" in n) {
+  if ("children" in n && (!compact || n.children.length)) {
     s.childCount = n.children.length;
     if (depth > 0) s.children = n.children.map((c) => serialize(c, depth - 1, compact));
   }
@@ -259,6 +290,23 @@ const handlers = {
       currentPage: { id: figma.currentPage.id, name: figma.currentPage.name },
       children: figma.currentPage.children.map(summarize),
     };
+  },
+
+  async list_pages() {
+    return {
+      currentPage: figma.currentPage.name,
+      pages: figma.root.children.map((p) => ({
+        id: p.id,
+        name: p.name,
+        current: p.id === figma.currentPage.id,
+      })),
+    };
+  },
+
+  async set_current_page(params) {
+    const p = await resolvePage(params.page);
+    await figma.setCurrentPageAsync(p);
+    return { id: p.id, name: p.name, childCount: p.children.length };
   },
 
   async get_selection() {
@@ -578,7 +626,10 @@ const handlers = {
   },
 
   async find_nodes(params) {
-    const scope = params.node_id ? await node(params.node_id) : figma.currentPage;
+    let scope;
+    if (params.node_id) scope = await node(params.node_id);
+    else if (params.page) scope = await resolvePage(params.page);
+    else scope = figma.currentPage;
     if (!("findAll" in scope)) throw new Error("node " + scope.id + " has no children to search");
     const name = params.name ? params.name.toLowerCase() : null;
     const text = params.text ? params.text.toLowerCase() : null;
@@ -608,7 +659,14 @@ const handlers = {
     });
     const max = params.max_results || 50;
     const fields = params.fields && params.fields.length ? params.fields : null;
+    // Name the scope: with no node_id or page this searches whatever page the
+    // user happens to have open, which silently changes under a long session.
+    const page = (function (n) {
+      while (n && n.type !== "PAGE") n = n.parent;
+      return n ? n.name : undefined;
+    })(scope);
     return {
+      scope: scope.type === "PAGE" ? "page " + scope.name : scope.name + " (page " + page + ")",
       total: matches.length,
       truncated: matches.length > max,
       nodes: matches.slice(0, max).map((n) => {
@@ -742,6 +800,7 @@ const handlers = {
     const parent = params.parent_id ? await node(params.parent_id) : nodes[0].parent;
     const set = figma.combineAsVariants(nodes, parent);
     if (params.name) set.name = params.name;
+    arrangeVariants(set);
     return summarize(set);
   },
 
@@ -982,17 +1041,22 @@ const handlers = {
       target = figma.currentPage;
     }
     if (!("exportAsync" in target)) throw new Error("node " + target.id + " cannot be exported");
-    let scale = params.scale || 1;
-    scale = Math.max(0.5, Math.min(scale, 4));
+    const requested = Math.max(0.5, Math.min(params.scale || 1, 4));
+    let scale = requested;
     // Cap the output size: huge pages at high scale produce multi-MB base64
     // payloads that are slow to ship and waste the AI's context.
+    const cap = params.max_dimension > 0 ? Math.min(params.max_dimension, 4096) : 2000;
     const maxDim = Math.max("width" in target ? target.width : 0, "height" in target ? target.height : 0);
-    if (maxDim * scale > 2000) scale = 2000 / maxDim;
+    const clamped = maxDim * scale > cap;
+    if (clamped) scale = cap / maxDim;
     const bytes = await target.exportAsync({ format: "PNG", constraint: { type: "SCALE", value: scale } });
     return {
       data: figma.base64Encode(bytes),
       width: ("width" in target ? target.width : 0) * scale,
       height: ("height" in target ? target.height : 0) * scale,
+      scale,
+      clamped,
+      sourceHeight: "height" in target ? target.height : 0,
     };
   },
 };
