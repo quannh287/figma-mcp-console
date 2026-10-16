@@ -211,6 +211,18 @@ All AI sessions and all Figma files share **one local bridge** on port 2000 — 
 - **Several Figma files**: run the plugin in each file (its window shows *Connected · \<file name\>*). With more than one file connected, every tool accepts a `file` parameter (file name, case-insensitive), and `list_files` shows what's connected — so you can say things like *"copy the primary color from **Design System** into the CTA button in **Landing Page**"* in a single session. With one file connected, nothing changes.
 - **Several code projects**: each AI session (one per project) reaches every connected file through the shared bridge. State which file you mean in the prompt and each session works with the right one.
 
+## ✂️ Hide tools you don't use
+
+Every listed tool takes up room in the AI's context, even in sessions that never touch Figma. Hide whole groups with `FIGMA_MCP_DISABLE` (or `-disable`): `components`, `styles`, `variables`, `prototype`. Hiding all four cuts the tool list by about a third.
+
+```json
+"figma-console": {
+  "command": "npx",
+  "args": ["-y", "figma-mcp-console@latest"],
+  "env": { "FIGMA_MCP_DISABLE": "variables,prototype" }
+}
+```
+
 ## 🧠 Teach your AI what to export, and where
 
 Exports follow the file extension the AI picks (`.svg` for vector, `.png`/`.jpg` for bitmap, with an optional 0.5–4x scale). It decides based on what you ask — so put your preferences in the project rules file once, and stop repeating yourself:

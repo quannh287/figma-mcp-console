@@ -53,6 +53,8 @@ A tool exists in four places. Miss one and it fails at runtime, not at compile t
 3. **`cmd/figma-mcp/main_test.go`** — bump the expected tool count. It is a deliberate tripwire against adding or dropping a tool by accident.
 4. **`internal/bridge.ProtocolVersion`** *and* the `PROTOCOL` constant in `plugin/ui.html` — only when you change the message shape or break an existing command. A hand-installed plugin cannot auto-update, so the mismatch warning is what tells users to re-import.
 
+If the tool belongs to components, styles, variables or prototype work, add it to `Groups` in `tools.go` so `FIGMA_MCP_DISABLE` hides it too.
+
 Conventions worth matching:
 
 - Mutating tools take `node_id` **or** `node_ids[]` via `nodeTarget`, and return `done(params, nodes)` — ids by default, full summaries only when `verbose` is set. A batch of 50 echoed summaries buries the caller's context.

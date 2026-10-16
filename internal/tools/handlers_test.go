@@ -38,4 +38,9 @@ func TestEveryBridgedToolHasAPluginHandler(t *testing.T) {
 			t.Errorf("tool %q has no matching handler in plugin/code.js", name)
 		}
 	}
+	for typ, cmd := range shapeCommands {
+		if !handlers[cmd] {
+			t.Errorf("create_shape type %s dispatches to %q, which has no handler in plugin/code.js", typ, cmd)
+		}
+	}
 }

@@ -45,7 +45,7 @@ func downloadTimeout(items int) time.Duration {
 // fileArg routes a call when several Figma files run the plugin at once.
 // Embed it in every tool's args struct.
 type fileArg struct {
-	File string `json:"file,omitempty" jsonschema:"which connected Figma file to act on: its file name (case-insensitive, unique substring ok) or file key, see list_files. Omit when only one file is connected"`
+	File string `json:"file,omitempty" jsonschema:"target file: name substring or key from list_files; omit if only one is connected"`
 }
 
 func (f fileArg) fileTarget() string { return f.File }
@@ -55,7 +55,7 @@ type fileTargeted interface{ fileTarget() string }
 // registerBridged wires an MCP tool named name straight to the plugin
 // command of the same name: typed args in, raw JSON result out as text.
 func registerBridged[In fileTargeted](s *mcp.Server, b *bridge.Router, name, desc string, timeout time.Duration) {
-	mcp.AddTool(s, &mcp.Tool{Name: name, Description: desc},
+	mcp.AddTool(s, &mcp.Tool{Name: name, Description: desc, Annotations: annotations(name)},
 		func(ctx context.Context, req *mcp.CallToolRequest, args In) (*mcp.CallToolResult, any, error) {
 			raw, err := b.Call(ctx, args.fileTarget(), name, args, timeout)
 			if err != nil {
@@ -67,15 +67,35 @@ func registerBridged[In fileTargeted](s *mcp.Server, b *bridge.Router, name, des
 		})
 }
 
+// destructive tools delete or overwrite work (nodes, a component link, files
+// on disk, or anything a script does); the other writes only add or edit.
+var destructive = map[string]bool{
+	"remove_nodes":    true,
+	"ungroup_nodes":   true,
+	"detach_instance": true,
+	"run_script":      true,
+	"download_assets": true,
+}
+
+// annotations derives the MCP hints from the tool name, so a new tool picks
+// them up without touching its registration.
+func annotations(name string) *mcp.ToolAnnotations {
+	if strings.HasPrefix(name, "get_") || strings.HasPrefix(name, "list_") || name == "find_nodes" {
+		return &mcp.ToolAnnotations{ReadOnlyHint: true}
+	}
+	d := destructive[name]
+	return &mcp.ToolAnnotations{DestructiveHint: &d}
+}
+
 type emptyArgs struct{ fileArg }
 
 // nodeTarget is the shared shape of every tool that mutates existing nodes:
 // one node or many in a single call, and a compact result by default so a
 // 50-node batch does not bury the caller in echoed summaries.
 type nodeTarget struct {
-	NodeID  string   `json:"node_id,omitempty" jsonschema:"target node ID; use node_ids to apply the same change to many nodes at once"`
-	NodeIDs []string `json:"node_ids,omitempty" jsonschema:"target node IDs, applied in one call (preferred over repeating the tool per node)"`
-	Verbose bool     `json:"verbose,omitempty" jsonschema:"return full node summaries instead of just the changed ids"`
+	NodeID  string   `json:"node_id,omitempty" jsonschema:"target node ID"`
+	NodeIDs []string `json:"node_ids,omitempty" jsonschema:"target node IDs, changed in one call"`
+	Verbose bool     `json:"verbose,omitempty" jsonschema:"return full node summaries, not just ids"`
 }
 
 type nodeInfoArgs struct {
@@ -85,8 +105,16 @@ type nodeInfoArgs struct {
 	Compact bool   `json:"compact,omitempty" jsonschema:"colors as hex and defaults omitted; use this first, the full form costs several thousand tokens per frame"`
 }
 
+// shapeCommands maps create_shape's type to the plugin command that builds it.
+var shapeCommands = map[string]string{
+	"FRAME":     "create_frame",
+	"RECTANGLE": "create_rectangle",
+	"ELLIPSE":   "create_ellipse",
+}
+
 type createShapeArgs struct {
 	fileArg
+	Type      string  `json:"type" jsonschema:"FRAME, RECTANGLE or ELLIPSE"`
 	Name      string  `json:"name,omitempty" jsonschema:"layer name"`
 	X         float64 `json:"x" jsonschema:"x position in the parent's coordinates"`
 	Y         float64 `json:"y" jsonschema:"y position in the parent's coordinates"`
@@ -140,7 +168,7 @@ type renameItem struct {
 type renameArgs struct {
 	fileArg
 	Items   []renameItem `json:"items" jsonschema:"nodes to rename with their new names"`
-	Verbose bool         `json:"verbose,omitempty" jsonschema:"return full node summaries instead of just the changed ids"`
+	Verbose bool         `json:"verbose,omitempty" jsonschema:"return full node summaries, not just ids"`
 }
 
 type textPropertiesArgs struct {
@@ -199,7 +227,7 @@ type appendChildrenArgs struct {
 	ParentID string   `json:"parent_id" jsonschema:"new parent node ID (frame, group, section or page)"`
 	NodeIDs  []string `json:"node_ids" jsonschema:"nodes to move into the new parent"`
 	Index    *int     `json:"index,omitempty" jsonschema:"insert position among the parent's children (default: append at the end)"`
-	Verbose  bool     `json:"verbose,omitempty" jsonschema:"return full node summaries instead of just the moved ids"`
+	Verbose  bool     `json:"verbose,omitempty" jsonschema:"return full node summaries, not just ids"`
 }
 
 type cloneArgs struct {
@@ -277,7 +305,7 @@ type moveItem struct {
 type moveArgs struct {
 	fileArg
 	Items   []moveItem `json:"items" jsonschema:"nodes to move with their new positions"`
-	Verbose bool       `json:"verbose,omitempty" jsonschema:"return full node summaries instead of just the changed ids"`
+	Verbose bool       `json:"verbose,omitempty" jsonschema:"return full node summaries, not just ids"`
 }
 
 type resizeItem struct {
@@ -289,7 +317,7 @@ type resizeItem struct {
 type resizeArgs struct {
 	fileArg
 	Items   []resizeItem `json:"items" jsonschema:"nodes to resize with their new sizes"`
-	Verbose bool         `json:"verbose,omitempty" jsonschema:"return full node summaries instead of just the changed ids"`
+	Verbose bool         `json:"verbose,omitempty" jsonschema:"return full node summaries, not just ids"`
 }
 
 type deleteArgs struct {
@@ -475,7 +503,7 @@ type prototypeLinkItem struct {
 type prototypeLinksArgs struct {
 	fileArg
 	Items   []prototypeLinkItem `json:"items" jsonschema:"prototype links to set, one per source node. Several items on the same node become its full set of reactions; the node's existing reactions are replaced"`
-	Verbose bool                `json:"verbose,omitempty" jsonschema:"return full node summaries instead of just the changed ids"`
+	Verbose bool                `json:"verbose,omitempty" jsonschema:"return full node summaries, not just ids"`
 }
 
 type prototypeLinksReadArgs struct {
@@ -510,7 +538,8 @@ type screenshotResult struct {
 func Register(s *mcp.Server, b *bridge.Router) {
 	// list_files is answered by the bridge itself, not a plugin.
 	mcp.AddTool(s, &mcp.Tool{
-		Name: "list_files",
+		Name:        "list_files",
+		Annotations: annotations("list_files"),
 		Description: "List the Figma files currently connected to the bridge (one per open plugin window). " +
 			"When several files are connected, pass one of the returned names as the file parameter of the other tools.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
@@ -550,15 +579,25 @@ func Register(s *mcp.Server, b *bridge.Router) {
 		"Get detailed information about a node (geometry, fills, text content) including its children up to the given depth. "+
 			"Pass compact: true unless you need raw paint objects — the full form runs to several thousand tokens for one frame.",
 		bridge.DefaultTimeout)
-	registerBridged[createShapeArgs](s, b, "create_frame",
-		"Create a new frame at the given position and size. Returns the created node's summary including its id.",
-		bridge.DefaultTimeout)
-	registerBridged[createShapeArgs](s, b, "create_rectangle",
-		"Create a new rectangle at the given position and size. Returns the created node's summary including its id.",
-		bridge.DefaultTimeout)
-	registerBridged[createShapeArgs](s, b, "create_ellipse",
-		"Create a new ellipse (or circle, when width equals height) at the given position and size.",
-		bridge.DefaultTimeout)
+	// One tool for three plugin commands: they share every argument, and each
+	// listed tool costs context in every session.
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "create_shape",
+		Description: "Create a FRAME, RECTANGLE or ELLIPSE (a circle when width equals height) at the given position and size. Returns the new node's summary including its id.",
+		Annotations: annotations("create_shape"),
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args createShapeArgs) (*mcp.CallToolResult, any, error) {
+		cmd, ok := shapeCommands[strings.ToUpper(args.Type)]
+		if !ok {
+			return nil, nil, fmt.Errorf("type must be FRAME, RECTANGLE or ELLIPSE, got %q", args.Type)
+		}
+		raw, err := b.Call(ctx, args.File, cmd, args, bridge.DefaultTimeout)
+		if err != nil {
+			return nil, nil, err
+		}
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: string(raw)}},
+		}, nil, nil
+	})
 	registerBridged[createLineArgs](s, b, "create_line",
 		"Create a straight line (e.g. a divider) with the given length, color and thickness.",
 		bridge.DefaultTimeout)
@@ -705,7 +744,7 @@ func Register(s *mcp.Server, b *bridge.Router) {
 		bridge.DefaultTimeout)
 	// run_script is registered by hand: a timed-out script keeps running in
 	// Figma, so the timeout needs to say that rather than invite a retry.
-	mcp.AddTool(s, &mcp.Tool{Name: "run_script", Description: "Run a JavaScript body against the Figma Plugin API in one call — the escape hatch for bulk work that would otherwise cost " +
+	mcp.AddTool(s, &mcp.Tool{Name: "run_script", Annotations: annotations("run_script"), Description: "Run a JavaScript body against the Figma Plugin API in one call — the escape hatch for bulk work that would otherwise cost " +
 		"hundreds of atomic calls, such as binding a variable to every white fill in a subtree. " +
 		"figma is in scope, await is allowed, and the returned value (plain data only) becomes the result; return nothing and you get a count of what was created. " +
 		"This is the real Figma Plugin API, not another tool's sandbox: there is no node.query(), node.set() or node.screenshot(), " +
@@ -754,7 +793,8 @@ func Register(s *mcp.Server, b *bridge.Router) {
 
 	// get_screenshot returns an image, so it can't use registerBridged.
 	mcp.AddTool(s, &mcp.Tool{
-		Name: "get_screenshot",
+		Name:        "get_screenshot",
+		Annotations: annotations("get_screenshot"),
 		Description: "Export a PNG screenshot of a node (or the current selection, or the whole page) " +
 			"and return it as an image. Use this to visually verify designs.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args screenshotArgs) (*mcp.CallToolResult, any, error) {
@@ -794,7 +834,8 @@ func Register(s *mcp.Server, b *bridge.Router) {
 	// import_image reads the image bytes here (the sandboxed plugin has no
 	// filesystem or free network access) and ships them to Figma as base64.
 	mcp.AddTool(s, &mcp.Tool{
-		Name: "import_image",
+		Name:        "import_image",
+		Annotations: annotations("import_image"),
 		Description: "Import an image from a URL or a project file into Figma, either as the fill of an " +
 			"existing node or as a new rectangle sized to the image.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args importImageArgs) (*mcp.CallToolResult, any, error) {
@@ -824,7 +865,8 @@ func Register(s *mcp.Server, b *bridge.Router) {
 	// download_assets writes the exported files to disk, so the file I/O
 	// happens here rather than in the sandboxed plugin.
 	mcp.AddTool(s, &mcp.Tool{
-		Name: "download_assets",
+		Name:        "download_assets",
+		Annotations: annotations("download_assets"),
 		Description: "Export one or more nodes as SVG, PNG or JPG images and save each to a file inside the " +
 			"project directory. Use this to bring icons and images from Figma into the codebase. " +
 			"When neither the user nor the project's conventions dictate where assets go, omit path and files " +
@@ -1014,4 +1056,33 @@ func resolveProjectPath(p string) (string, error) {
 		return "", fmt.Errorf("path %q escapes the project directory %s", p, root)
 	}
 	return dest, nil
+}
+
+// Groups are the specialist tool sets a user can switch off to save context
+// in sessions that never touch them. Everything else is always on.
+var Groups = map[string][]string{
+	"components": {"create_component", "get_local_components", "create_instance", "combine_as_variants",
+		"add_component_property", "set_instance_properties", "swap_component", "detach_instance"},
+	"styles": {"get_local_styles", "create_paint_style", "create_text_style", "create_effect_style", "apply_style"},
+	"variables": {"get_variable_defs", "create_variable_collection", "add_variable_mode", "create_variable",
+		"set_variable_value", "set_bound_variable"},
+	"prototype": {"set_prototype_links", "get_prototype_links", "set_flow_starting_point"},
+}
+
+// Disable removes the tools of each group in the comma-separated spec, e.g.
+// "variables,prototype". An unknown group is an error, so a typo is not
+// mistaken for a smaller tool list.
+func Disable(s *mcp.Server, spec string) error {
+	for _, g := range strings.Split(spec, ",") {
+		g = strings.ToLower(strings.TrimSpace(g))
+		if g == "" {
+			continue
+		}
+		names, ok := Groups[g]
+		if !ok {
+			return fmt.Errorf("unknown tool group %q (have components, styles, variables, prototype)", g)
+		}
+		s.RemoveTools(names...)
+	}
+	return nil
 }

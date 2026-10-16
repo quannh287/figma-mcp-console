@@ -1,11 +1,16 @@
 package tools
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/hoangann2000/figma-mcp-console/internal/bridge"
 )
 
 func TestAssetFileName(t *testing.T) {
@@ -82,5 +87,57 @@ func TestAssetFileNameIsPathSafe(t *testing.T) {
 		if strings.HasPrefix(got, "-") || strings.HasSuffix(got, "-") {
 			t.Errorf("assetFileName(%q) = %q has a stray leading/trailing dash", in, got)
 		}
+	}
+}
+
+// A group naming a tool that does not exist would hide nothing for it, so
+// check every name against the real registration, then that Disable hides them.
+func TestDisableGroups(t *testing.T) {
+	listed := func(disable string) map[string]bool {
+		s := mcp.NewServer(&mcp.Implementation{Name: "t", Version: "0"}, nil)
+		Register(s, bridge.NewRouter("t", "0", 0))
+		if err := Disable(s, disable); err != nil {
+			t.Fatal(err)
+		}
+		ct, st := mcp.NewInMemoryTransports()
+		ctx := context.Background()
+		if _, err := s.Connect(ctx, st, nil); err != nil {
+			t.Fatal(err)
+		}
+		cs, err := mcp.NewClient(&mcp.Implementation{Name: "c", Version: "0"}, nil).Connect(ctx, ct, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer cs.Close()
+		res, err := cs.ListTools(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		names := map[string]bool{}
+		for _, tool := range res.Tools {
+			names[tool.Name] = true
+		}
+		return names
+	}
+
+	all := listed("")
+	hidden := listed("components, STYLES,variables,prototype")
+	for g, names := range Groups {
+		for _, n := range names {
+			if !all[n] {
+				t.Errorf("group %s lists %q, which is not a registered tool", g, n)
+			}
+			if hidden[n] {
+				t.Errorf("group %s disabled but %q is still listed", g, n)
+			}
+		}
+	}
+	if !hidden["create_shape"] {
+		t.Error("disabling every group also removed a core tool")
+	}
+
+	s := mcp.NewServer(&mcp.Implementation{Name: "t", Version: "0"}, nil)
+	if err := Disable(s, "variabels"); err == nil {
+		t.Error("a misspelt group should be an error")
 	}
 }

@@ -36,6 +36,8 @@ func main() {
 	log.SetPrefix("figma-mcp: ")
 
 	port := flag.Int("port", 0, "WebSocket bridge port (default $FIGMA_MCP_PORT, or 2000)")
+	disable := flag.String("disable", os.Getenv("FIGMA_MCP_DISABLE"),
+		"comma-separated tool groups to hide: components, styles, variables, prototype (default $FIGMA_MCP_DISABLE)")
 	flag.Parse()
 	if *port == 0 {
 		if env := os.Getenv("FIGMA_MCP_PORT"); env != "" {
@@ -63,7 +65,6 @@ func main() {
 		project = filepath.Base(cwd)
 	}
 	r := bridge.NewRouter(project, version, *port)
-	go r.Run()
 
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "figma-console",
@@ -71,6 +72,12 @@ func main() {
 		Version: version,
 	}, nil)
 	tools.Register(server, r)
+	if err := tools.Disable(server, *disable); err != nil {
+		log.Fatal(err)
+	}
+	// Start the bridge only once the flags are valid, so a bad one never
+	// grabs the port from a working session.
+	go r.Run()
 	tools.RegisterPrompts(server)
 
 	if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
