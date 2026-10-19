@@ -708,7 +708,9 @@ func Register(s *mcp.Server, b *bridge.Router) {
 		bridge.DefaultTimeout)
 	registerBridged[resizeArgs](s, b, "resize_nodes",
 		"Resize one or more nodes to the given widths and heights. "+
-			"Children only follow if they have constraints or auto-layout; inside a plain frame or component you must reposition them yourself with move_nodes.",
+			"Children only follow if they have constraints or auto-layout; inside a plain frame or component you must reposition them yourself with move_nodes. "+
+			"Resizing a frame also resets its auto-layout sizing modes to FIXED, so resize before set_auto_layout — a frame set to hug and then resized "+
+			"stays locked at that size with its content spilling out.",
 		bridge.DefaultTimeout)
 	registerBridged[deleteArgs](s, b, "remove_nodes",
 		"Remove (delete) one or more nodes from the document.",
