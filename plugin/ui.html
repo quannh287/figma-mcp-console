@@ -313,19 +313,20 @@
     sock.onmessage = (e) => {
       const msg = JSON.parse(e.data);
       if (msg.hello) {
-        // Name the side that is behind: a stale server is just as common as
-        // a stale plugin, and blaming the plugin sends people re-importing
-        // a plugin that was already up to date.
         // Show which server build we are talking to; "dev" means a local
         // go build rather than a release.
         if (msg.hello.version) {
           document.getElementById("version").textContent = "v" + msg.hello.version;
         }
+        // Name the side that is behind: a stale server is just as common as
+        // a stale plugin, and blaming the plugin sends people re-importing
+        // a plugin that was already up to date.
         protoWarning = null;
         if (msg.hello.protocol && msg.hello.protocol !== PROTOCOL) {
+          // npx figrelay@latest only fetches the new server when the AI client restarts it.
           protoWarning =
             msg.hello.protocol < PROTOCOL
-              ? "⚠ Server outdated — update figrelay"
+              ? "⚠ Server outdated — restart your AI client"
               : "⚠ Plugin outdated — re-import from the latest release";
         }
         setStatus(true, label());
