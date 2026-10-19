@@ -68,7 +68,7 @@ func main() {
 
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "figma-console",
-		Title:   "Figma MCP Console",
+		Title:   "Figma Relay",
 		Version: version,
 	}, nil)
 	tools.Register(server, r)

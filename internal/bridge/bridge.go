@@ -28,7 +28,7 @@ import (
 // ErrNotConnected is returned by calls when no Figma plugin is connected.
 var ErrNotConnected = errors.New(
 	"no Figma plugin is connected. In Figma Desktop, open your design file, " +
-		"run Plugins → Development → Figma MCP Console, and keep its window open. " +
+		"run Plugins → Development → Figma Relay, and keep its window open. " +
 		"Run it in every file you want to work with")
 
 // Request is sent from the bridge owner to a Figma plugin.

@@ -1,12 +1,12 @@
 {
-  "name": "figma-mcp-console",
+  "name": "figrelay",
   "version": "0.7.0",
   "scripts": {
     "prepublishOnly": "cp ../README.md ./README.md"
   },
-  "description": "Figma MCP server for AI coding assistants — real-time read/write via a Figma Desktop plugin. No API token, no rate limits.",
+  "description": "Figma MCP server (fork of figma-mcp-console) for AI coding assistants — real-time read/write via a Figma Desktop plugin. No API token, no rate limits.",
   "bin": {
-    "figma-mcp-console": "run.js"
+    "figrelay": "run.js"
   },
   "files": [
     "run.js",
@@ -17,11 +17,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/hoangann2000/figma-mcp-console.git"
+    "url": "git+https://github.com/quannh287/figma-mcp-console.git"
   },
-  "homepage": "https://github.com/hoangann2000/figma-mcp-console#readme",
+  "homepage": "https://github.com/quannh287/figma-mcp-console#readme",
   "bugs": {
-    "url": "https://github.com/hoangann2000/figma-mcp-console/issues"
+    "url": "https://github.com/quannh287/figma-mcp-console/issues"
   },
   "keywords": [
     "figma",
@@ -29,6 +29,7 @@
     "model-context-protocol",
     "claude",
     "cursor",
+    "figma-mcp-console",
     "design"
   ],
   "license": "MIT"

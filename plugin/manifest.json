@@ -1,6 +1,6 @@
 {
-  "name": "Figma MCP Console",
-  "id": "figma-mcp-console-dev",
+  "name": "Figma Relay",
+  "id": "figrelay-dev",
   "api": "1.0.0",
   "main": "code.js",
   "ui": "ui.html",

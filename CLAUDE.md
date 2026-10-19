@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A stdio MCP server (Go) that lets AI clients read/write Figma documents in real time through a Figma Desktop **development plugin** — no Figma REST API, no token. Shipped on npm (`figma-mcp-console`) as prebuilt binaries; the plugin is shipped as `plugin.zip` on GitHub Releases.
+A stdio MCP server (Go) that lets AI clients read/write Figma documents in real time through a Figma Desktop **development plugin** — no Figma REST API, no token. Shipped on npm (`figrelay`, a fork of `figma-mcp-console`) as prebuilt binaries; the plugin is shipped as `plugin.zip` on GitHub Releases.
 
 ## Commands
 

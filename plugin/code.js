@@ -1,4 +1,4 @@
-// Figma MCP Console — plugin main thread.
+// Figma Relay — plugin main thread.
 // Receives {id, command, params} from the Go bridge (relayed through ui.html),
 // executes it against the Figma Plugin API, and replies {id, result|error}.
 

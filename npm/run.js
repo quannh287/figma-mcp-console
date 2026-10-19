@@ -10,7 +10,7 @@ const path = require("path");
 const plat = process.platform === "win32" ? "windows" : process.platform; // darwin|linux|windows
 const arch = { x64: "amd64", arm64: "arm64" }[process.arch];
 function fail(m) {
-  process.stderr.write(`figma-mcp-console: ${m}\n`);
+  process.stderr.write(`figrelay: ${m}\n`);
   process.exit(1);
 }
 if (!arch || !["darwin", "linux", "windows"].includes(plat))
@@ -28,7 +28,7 @@ const binPath = path.join(
 // and open that folder so the user sees manifest.json right away.
 if (process.argv[2] === "install-plugin") {
   const srcDir = path.join(__dirname, "bin", "plugin");
-  const destDir = path.join(os.homedir(), "figma-mcp-console-plugin");
+  const destDir = path.join(os.homedir(), "figrelay-plugin");
   fs.mkdirSync(destDir, { recursive: true });
   for (const f of ["code.js", "ui.html", "manifest.json"])
     fs.copyFileSync(path.join(srcDir, f), path.join(destDir, f));

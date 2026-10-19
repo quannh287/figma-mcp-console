@@ -22,7 +22,7 @@ claude mcp remove figma-console
 claude mcp add figma-console -- /tmp/figma-mcp
 ```
 
-Then in Figma Desktop: **Plugins → Development → Import plugin from manifest…** → pick `plugin/manifest.json` **from your checkout**, and run **Plugins → Development → Figma MCP Console**. Keep the window open; a green dot means it reached the bridge.
+Then in Figma Desktop: **Plugins → Development → Import plugin from manifest…** → pick `plugin/manifest.json` **from your checkout**, and run **Plugins → Development → Figma Relay**. Keep the window open; a green dot means it reached the bridge.
 
 Exported assets are written relative to the server's working directory, which is wherever your client launched it.
 
