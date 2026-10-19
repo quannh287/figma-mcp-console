@@ -21,4 +21,6 @@ done
 echo "→ copy plugin..."
 mkdir -p "$OUT/plugin"
 cp plugin/code.js plugin/ui.html plugin/manifest.json "$OUT/plugin/"
+echo "→ copy skills..."
+cp -R skills "$OUT/skills"
 echo "✅ done → npm/bin/"

@@ -51,6 +51,24 @@ if (process.argv[2] === "install-plugin") {
   process.exit(0);
 }
 
+// Subcommand: install-skills — copy the agent skills into the current project
+// so the AI client picks them up from .claude/skills/<name>/SKILL.md.
+if (process.argv[2] === "install-skills") {
+  const srcDir = path.join(__dirname, "bin", "skills");
+  const destDir = path.join(process.cwd(), ".claude", "skills");
+  if (!fs.existsSync(srcDir)) fail("skills not found in this package");
+  for (const name of fs.readdirSync(srcDir)) {
+    fs.mkdirSync(path.join(destDir, name), { recursive: true });
+    fs.copyFileSync(
+      path.join(srcDir, name, "SKILL.md"),
+      path.join(destDir, name, "SKILL.md"),
+    );
+    process.stdout.write(`  ${name}\n`);
+  }
+  process.stdout.write(`\n✅ Skills installed into ${destDir}\n`);
+  process.exit(0);
+}
+
 if (!fs.existsSync(binPath)) fail(`binary not found for ${plat}-${arch}`);
 try {
   fs.chmodSync(binPath, 0o755);
