@@ -82,11 +82,10 @@ There is no test harness for `plugin/code.js` — CI never runs it. At minimum `
 
 ## Releasing (maintainers)
 
-```sh
-vim npm/package.json          # version is the single source of truth
-./npm/build.sh                # 6 binaries + plugin copy -> npm/bin/
-cd npm && npm publish
-git tag v0.6.0 && git push origin v0.6.0
-```
+Releases are automated by `release.yml`:
 
-The tag is what triggers `release.yml`, which packages `plugin/` into `plugin.zip` and creates the GitHub Release. Binaries ship through npm only — no workflow publishes them. Publish and tag together: a release whose plugin speaks a newer protocol than the published server makes every user see the outdated warning.
+1. Every push to `main` updates a **release PR** from release-please: next version from the Conventional Commits, `CHANGELOG.md`, and the version in `npm/package.json`.
+2. Merging that PR tags `vX.Y.Z` and creates the GitHub Release.
+3. The publish job then runs `npm/build.sh`, attaches `plugin.zip` to the release and runs `npm publish`, so the plugin and the server always ship together.
+
+npm auth uses trusted publishing (OIDC): on npmjs.com, `figrelay` → Settings → Trusted publishing, add GitHub Actions with repo `quannh287/figma-mcp-console` and workflow `release.yml`. No `NPM_TOKEN` secret is needed.

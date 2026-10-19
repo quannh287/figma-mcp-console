@@ -1,24 +1,51 @@
 name: release
 
-# On pushing tag vX.Y.Z → package plugin/ into plugin.zip and create a GitHub Release.
-# (Binaries are distributed via npm; no build needed here.)
+# release-please keeps a release PR open; merging it tags vX.Y.Z, then the
+# publish job builds the binaries, attaches plugin.zip and publishes to npm.
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
-  release:
+  release-please:
     runs-on: ubuntu-latest
+    outputs:
+      created: ${{ steps.rp.outputs.release_created }}
+      tag: ${{ steps.rp.outputs.tag_name }}
+    steps:
+      - id: rp
+        uses: googleapis/release-please-action@v4
+
+  publish:
+    needs: release-please
+    if: needs.release-please.outputs.created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write # npm trusted publishing (OIDC), no NPM_TOKEN
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - run: go test ./...
+      - run: ./npm/build.sh
 
-      - name: Package Figma plugin
-        run: cd plugin && zip -r ../plugin.zip .
-
-      - name: Create GitHub release with plugin.zip
+      - name: Attach plugin.zip to the release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create "${GITHUB_REF_NAME}" plugin.zip --title "${GITHUB_REF_NAME}" --generate-notes
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          (cd plugin && zip -r ../plugin.zip .)
+          gh release upload "${{ needs.release-please.outputs.tag }}" plugin.zip --clobber
+
+      - name: Publish to npm
+        working-directory: npm
+        run: npm publish

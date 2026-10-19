@@ -35,7 +35,7 @@ Three processes, one hop each: **MCP client → Go server (stdio) → WebSocket 
 
 - **Port 2000** appears in `main.go` (`defaultPort`), `plugin/manifest.json` (`devAllowedDomains`) and `ui.html`.
 - **`bridge.ProtocolVersion`** — bump on any breaking change to the command set or message shape; `ui.html` carries the matching constant and warns in its status line on mismatch.
-- **Version** — single source of truth is `npm/package.json`; `npm/build.sh` injects it via `-ldflags -X main.version=`. Tagging `vX.Y.Z` triggers the release workflow (plugin.zip only; binaries go out via npm).
+- **Version** — single source of truth is `npm/package.json`; `npm/build.sh` injects it via `-ldflags -X main.version=`. release-please bumps it; merging its release PR makes `release.yml` build, attach `plugin.zip` and `npm publish`.
 - A new tool means: args struct + `registerBridged` call in `tools.go` **and** a handler in `plugin/code.js`.
 
 ### Multi-file routing
