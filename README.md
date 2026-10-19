@@ -7,7 +7,7 @@
 > **Let your AI assistant design in Figma — no API token, no rate limits.**
 > Works with Claude CLI · Claude Desktop · Codex · VS Code · Cursor · Antigravity · any MCP client.
 
-> **Fork of [figma-mcp-console](https://github.com/hoangann2000/figma-mcp-console)** by [@hoangann2000](https://github.com/hoangann2000), forked at v0.5.4. Same setup, published on npm as `figrelay`; the plugin now shows as **Figma Relay**.
+> **Fork of [figma-mcp-console](https://github.com/hoangann2000/figma-mcp-console)** by [@hoangann2000](https://github.com/hoangann2000), forked at v0.5.4. Same setup, published on npm as [`figrelay`](https://www.npmjs.com/package/figrelay); the plugin now shows as **Figma Relay**.
 
 ## 🆕 What's new since the fork
 
