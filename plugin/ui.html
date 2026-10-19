@@ -57,6 +57,44 @@
     box-shadow: 0 0 0 3px rgba(34, 160, 107, 0.15);
   }
 
+  #collapse {
+    flex: none;
+    margin-left: auto;
+    width: 18px;
+    height: 18px;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: #8288a0;
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  #collapse:hover {
+    background: #eef0f7;
+    color: #2c2c34;
+  }
+
+  /* Collapsed: the dot only, at Figma's 70px minimum width. */
+  body.mini {
+    padding: 4px;
+  }
+
+  body.mini .card {
+    padding: 4px;
+    display: flex;
+    justify-content: center;
+  }
+
+  body.mini #status,
+  body.mini #collapse,
+  body.mini #hint,
+  body.mini #result,
+  body.mini #credit {
+    display: none;
+  }
+
   #hint {
     color: #6b6f7d;
     margin-top: 5px;
@@ -252,6 +290,7 @@
 <div class="card">
   <div id="status-row">
     <span id="dot"></span><span id="status">Connecting…</span>
+    <button id="collapse" title="Collapse to a dot">&minus;</button>
   </div>
   <div id="hint">Keep open while AI works · run it in every file.</div>
   <div id="result"></div>
@@ -550,7 +589,22 @@
     }
   };
 
-  document.getElementById("status-row").onclick = () => connect();
+  // Collapsed, the whole card is the expand target; expanded, the status row
+  // still retries the connection.
+  let mini = false;
+  function setMini(on) {
+    mini = on;
+    document.body.classList.toggle("mini", on);
+    parent.postMessage({ pluginMessage: { collapsed: on } }, "*");
+  }
+  document.getElementById("collapse").onclick = (e) => {
+    e.stopPropagation();
+    setMini(true);
+  };
+  document.getElementById("status-row").onclick = () => {
+    if (mini) return setMini(false);
+    connect();
+  };
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden && !ws) connect();
   });

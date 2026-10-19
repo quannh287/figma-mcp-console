@@ -4,6 +4,10 @@
 
 figma.showUI(__html__, { width: 280, height: 104 });
 
+// The UI can collapse to a dot; selection changes must not resize it back.
+let collapsed = false;
+let fullHeight = 104;
+
 // Tell the UI which file this plugin window runs in; the UI forwards it to
 // the bridge on every (re)connect so calls can be routed per file when
 // several files run the plugin at once. figma.fileKey is undefined for
@@ -1326,10 +1330,10 @@ async function postSelection() {
   // the paste-URL prompt when a frame needs a key (64) + up to 6 visible rows
   // (the list scrolls beyond that).
   const rows = Math.min(items.length, 6);
-  const h = items.length
+  fullHeight = items.length
     ? 134 + (items.length > 1 ? 22 : 0) + (needsKey ? 64 : 0) + rows * 30
     : 104;
-  figma.ui.resize(280, h);
+  if (!collapsed) figma.ui.resize(280, fullHeight);
 }
 figma.on("selectionchange", postSelection);
 postSelection();
@@ -1338,6 +1342,14 @@ postSelection();
 
 figma.ui.onmessage = async (msg) => {
   if (!msg) return;
+  // Control message from the UI: collapse to a dot. The window has to stay
+  // open for the bridge, so shrinking it is the only way to get the screen
+  // space back. 70 is Figma's minimum width.
+  if (typeof msg.collapsed === "boolean") {
+    collapsed = msg.collapsed;
+    figma.ui.resize(collapsed ? 70 : 280, collapsed ? 36 : fullHeight);
+    return;
+  }
   // Control message from the UI: the user pasted the file URL to enable links.
   if (typeof msg.setFileKey === "string") {
     setFileKey(msg.setFileKey);
