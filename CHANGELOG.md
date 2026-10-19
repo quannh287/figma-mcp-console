@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.9.0](https://github.com/quannh287/figma-relay/compare/v0.8.1...v0.9.0) (2026-10-19)
+
+
+### Features
+
+* **plugin:** let the UI collapse to a dot ([e92cf2e](https://github.com/quannh287/figma-relay/commit/e92cf2e9ceb7c306d6586ed100f6293129b918f8))
+* **skills:** ship agent skills for the Figma workflows ([1ddec36](https://github.com/quannh287/figma-relay/commit/1ddec3607b3c2b4904ce416234f1b37f2cdc4b61))
+
+
+### Bug Fixes
+
+* **tools:** warn that resize_nodes resets auto-layout sizing modes ([d3d4696](https://github.com/quannh287/figma-relay/commit/d3d46967bf4483c27fd06e62a229e6a7287e3b67))
+
 ## [0.8.1](https://github.com/quannh287/figma-relay/compare/v0.8.0...v0.8.1) (2026-10-19)
 
 
