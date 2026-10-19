@@ -17,11 +17,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/quannh287/figma-mcp-console.git"
+    "url": "git+https://github.com/quannh287/figma-relay.git"
   },
-  "homepage": "https://github.com/quannh287/figma-mcp-console#readme",
+  "homepage": "https://github.com/quannh287/figma-relay#readme",
   "bugs": {
-    "url": "https://github.com/quannh287/figma-mcp-console/issues"
+    "url": "https://github.com/quannh287/figma-relay/issues"
   },
   "keywords": [
     "figma",

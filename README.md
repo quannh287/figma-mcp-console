@@ -2,7 +2,7 @@
 
 [![npm](https://img.shields.io/npm/v/figrelay?color=cb3837&logo=npm)](https://www.npmjs.com/package/figrelay)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-blue)](https://modelcontextprotocol.io/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/quannh287/figma-mcp-console/blob/main/LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/quannh287/figma-relay/blob/main/LICENSE)
 
 > **Let your AI assistant design in Figma — no API token, no rate limits.**
 > Works with Claude CLI · Claude Desktop · Codex · VS Code · Cursor · Antigravity · any MCP client.
@@ -182,7 +182,7 @@ First, get the plugin folder onto your machine — **pick either option:**
 
 **📦 Option A — Download from GitHub (recommended)**
 
-> 1. Download **[plugin.zip](https://github.com/quannh287/figma-mcp-console/releases/latest)** → **unzip it**
+> 1. Download **[plugin.zip](https://github.com/quannh287/figma-relay/releases/latest)** → **unzip it**
 
 **⌨️ Option B — Get it via command** *(if the download doesn't work)*
 
@@ -275,6 +275,6 @@ Setup, how to add a tool, and the gotchas that cost time: **[CONTRIBUTING.md](CO
 
 ## 📄 License
 
-[MIT](https://github.com/quannh287/figma-mcp-console/blob/main/LICENSE) — © [Hoang Le Thien An](https://github.com/hoangann2000) (original project), fork maintained by [@quannh287](https://github.com/quannh287)
+[MIT](https://github.com/quannh287/figma-relay/blob/main/LICENSE) — © [Hoang Le Thien An](https://github.com/hoangann2000) (original project), fork maintained by [@quannh287](https://github.com/quannh287)
 
 > This is an independent community project, not affiliated with or endorsed by Figma, Inc. "Figma" is a trademark of Figma, Inc.

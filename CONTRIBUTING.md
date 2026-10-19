@@ -88,4 +88,4 @@ Releases are automated by `release.yml`:
 2. Merging that PR tags `vX.Y.Z` and creates the GitHub Release.
 3. The publish job then runs `npm/build.sh`, attaches `plugin.zip` to the release and runs `npm publish`, so the plugin and the server always ship together.
 
-npm auth uses trusted publishing (OIDC): on npmjs.com, `figrelay` → Settings → Trusted publishing, add GitHub Actions with repo `quannh287/figma-mcp-console` and workflow `release.yml`. No `NPM_TOKEN` secret is needed.
+npm auth uses trusted publishing (OIDC): on npmjs.com, `figrelay` → Settings → Trusted publishing, add GitHub Actions with repo `quannh287/figma-relay` and workflow `release.yml`. No `NPM_TOKEN` secret is needed.
