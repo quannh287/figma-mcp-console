@@ -3,7 +3,6 @@ package bridge
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -53,7 +52,7 @@ func (p *Peer) readLoop() {
 		if err := wsjson.Read(ctx, p.c, &resp); err != nil {
 			p.mu.Lock()
 			for id, ch := range p.pending {
-				ch <- peerResponse{ID: id, Error: "bridge owner disconnected, request abandoned"}
+				ch <- peerResponse{ID: id, Error: "bridge owner disconnected, request abandoned", Kind: kindDisconnected}
 				delete(p.pending, id)
 			}
 			p.mu.Unlock()
@@ -104,7 +103,7 @@ func (p *Peer) Call(ctx context.Context, file, command string, params any, timeo
 	select {
 	case resp := <-ch:
 		if resp.Error != "" {
-			return nil, errors.New(resp.Error)
+			return nil, resp.err()
 		}
 		return resp.Result, nil
 	case <-ctx.Done():
@@ -112,7 +111,7 @@ func (p *Peer) Call(ctx context.Context, file, command string, params any, timeo
 		return nil, ctx.Err()
 	case <-timer.C:
 		unregister()
-		return nil, fmt.Errorf("bridge owner did not answer %q within %s", command, timeout)
+		return nil, withKind(ErrTimeout, fmt.Sprintf("bridge owner did not answer %q within %s", command, timeout))
 	}
 }
 

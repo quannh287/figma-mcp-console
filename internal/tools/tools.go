@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -61,10 +62,12 @@ func registerBridged[In fileTargeted](s *mcp.Server, b *bridge.Router, name, des
 			if err != nil {
 				return nil, nil, err
 			}
-			return &mcp.CallToolResult{
-				Content: []mcp.Content{&mcp.TextContent{Text: string(raw)}},
-			}, nil, nil
+			return textResult(string(raw)), nil, nil
 		})
+}
+
+func textResult(s string) *mcp.CallToolResult {
+	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: s}}}
 }
 
 // destructive tools delete or overwrite work (nodes, a component link, files
@@ -554,9 +557,7 @@ func Register(s *mcp.Server, b *bridge.Router) {
 		if err != nil {
 			return nil, nil, err
 		}
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: string(out)}},
-		}, nil, nil
+		return textResult(string(out)), nil, nil
 	})
 
 	registerBridged[emptyArgs](s, b, "list_pages",
@@ -594,9 +595,7 @@ func Register(s *mcp.Server, b *bridge.Router) {
 		if err != nil {
 			return nil, nil, err
 		}
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: string(raw)}},
-		}, nil, nil
+		return textResult(string(raw)), nil, nil
 	})
 	registerBridged[createLineArgs](s, b, "create_line",
 		"Create a straight line (e.g. a divider) with the given length, color and thickness.",
@@ -769,9 +768,8 @@ func Register(s *mcp.Server, b *bridge.Router) {
 				// Both a timeout and a lost connection leave the script running
 				// in Figma, so the work may already be done. Saying so is the
 				// difference between a safe retry and duplicated work.
-				msg := err.Error()
-				timedOut := strings.Contains(msg, "did not answer")
-				dropped := strings.Contains(msg, "disconnected")
+				timedOut := errors.Is(err, bridge.ErrTimeout)
+				dropped := errors.Is(err, bridge.ErrDisconnected)
 				if timedOut || dropped {
 					hint := "; Figma cannot abort a running script, so this one is still running and can keep changing the document — " +
 						"including the cleanup in its own catch block, which may delete work you do in the meantime. " +
@@ -788,9 +786,7 @@ func Register(s *mcp.Server, b *bridge.Router) {
 				}
 				return nil, nil, err
 			}
-			return &mcp.CallToolResult{
-				Content: []mcp.Content{&mcp.TextContent{Text: string(raw)}},
-			}, nil, nil
+			return textResult(string(raw)), nil, nil
 		})
 
 	// get_screenshot returns an image, so it can't use registerBridged.
@@ -845,23 +841,14 @@ func Register(s *mcp.Server, b *bridge.Router) {
 		if err != nil {
 			return nil, nil, err
 		}
-		raw, err := b.Call(ctx, args.File, "import_image", map[string]any{
-			"data":       base64.StdEncoding.EncodeToString(data),
-			"node_id":    args.NodeID,
-			"x":          args.X,
-			"y":          args.Y,
-			"width":      args.Width,
-			"height":     args.Height,
-			"scale_mode": args.ScaleMode,
-			"name":       args.Name,
-			"parent_id":  args.ParentID,
-		}, screenshotTimeout)
+		raw, err := b.Call(ctx, args.File, "import_image", struct {
+			importImageArgs
+			Data string `json:"data"`
+		}{args, base64.StdEncoding.EncodeToString(data)}, screenshotTimeout)
 		if err != nil {
 			return nil, nil, err
 		}
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: string(raw)}},
-		}, nil, nil
+		return textResult(string(raw)), nil, nil
 	})
 
 	// download_assets writes the exported files to disk, so the file I/O
@@ -970,15 +957,15 @@ func Register(s *mcp.Server, b *bridge.Router) {
 		if failed == len(args.Items) {
 			return nil, nil, fmt.Errorf("all %d exports failed:\n%s", failed, strings.Join(lines, "\n"))
 		}
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: strings.Join(lines, "\n")}},
-		}, nil, nil
+		return textResult(strings.Join(lines, "\n")), nil, nil
 	})
 }
 
 // maxImageBytes caps import_image payloads; Figma itself rejects images
 // larger than 4096x4096.
 const maxImageBytes = 20 << 20
+
+var imageClient = &http.Client{Timeout: 60 * time.Second}
 
 // loadImageBytes fetches an http(s) URL or reads a file inside the project.
 func loadImageBytes(ctx context.Context, source string) ([]byte, error) {
@@ -987,7 +974,7 @@ func loadImageBytes(ctx context.Context, source string) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("bad image URL: %w", err)
 		}
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := imageClient.Do(req)
 		if err != nil {
 			return nil, fmt.Errorf("fetch image: %w", err)
 		}
@@ -1018,8 +1005,6 @@ func loadImageBytes(ctx context.Context, source string) ([]byte, error) {
 	return data, nil
 }
 
-// resolveProjectPath resolves p against the current working directory (the
-// project the MCP client launched us in) and rejects paths that escape it.
 // assetFileName turns a Figma layer name like "icon/Arrow Right" into
 // "arrow-right" for the default export path. The part before the last
 // slash is a naming-convention prefix, not part of the asset's name.
@@ -1041,6 +1026,8 @@ func assetFileName(name string) string {
 	return strings.TrimRight(b.String(), "-")
 }
 
+// resolveProjectPath resolves p against the current working directory (the
+// project the MCP client launched us in) and rejects paths that escape it.
 func resolveProjectPath(p string) (string, error) {
 	if p == "" {
 		return "", fmt.Errorf("path is required")

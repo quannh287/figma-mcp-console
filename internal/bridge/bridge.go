@@ -31,6 +31,23 @@ var ErrNotConnected = errors.New(
 		"run Plugins → Development → Figma Relay, and keep its window open. " +
 		"Run it in every file you want to work with")
 
+// ErrTimeout and ErrDisconnected mark calls whose command may still be running in Figma.
+var (
+	ErrTimeout      = errors.New("timed out")
+	ErrDisconnected = errors.New("disconnected")
+)
+
+// kindError keeps a call's own message while letting errors.Is match its sentinel.
+type kindError struct {
+	msg  string
+	kind error
+}
+
+func (e *kindError) Error() string { return e.msg }
+func (e *kindError) Unwrap() error { return e.kind }
+
+func withKind(kind error, msg string) error { return &kindError{msg: msg, kind: kind} }
+
 // Request is sent from the bridge owner to a Figma plugin.
 type Request struct {
 	ID      string          `json:"id"`
@@ -43,6 +60,7 @@ type Response struct {
 	ID     string          `json:"id"`
 	Result json.RawMessage `json:"result,omitempty"`
 	Error  string          `json:"error,omitempty"`
+	kind   error
 }
 
 // FileInfo identifies one connected Figma file (one plugin window).
@@ -345,7 +363,7 @@ func (b *Bridge) dropPlugin(pc *pluginConn, err error) {
 	delete(b.conns, pc.id)
 	for id, p := range b.pending {
 		if p.connID == pc.id {
-			p.ch <- Response{ID: id, Error: "plugin disconnected"}
+			p.ch <- Response{ID: id, Error: "plugin disconnected", kind: ErrDisconnected}
 			delete(b.pending, id)
 		}
 	}
@@ -465,6 +483,9 @@ func (b *Bridge) CallFile(ctx context.Context, file, command string, params any,
 	defer timer.Stop()
 	select {
 	case resp := <-ch:
+		if resp.kind != nil {
+			return nil, withKind(resp.kind, resp.Error)
+		}
 		if resp.Error != "" {
 			return nil, errors.New(resp.Error)
 		}
@@ -479,11 +500,11 @@ func (b *Bridge) CallFile(ctx context.Context, file, command string, params any,
 		// than a hang. Say which it was, so the caller knows a retry helps.
 		inflight := b.inflight(pc.id)
 		if inflight > 0 {
-			return nil, fmt.Errorf("figma plugin %q did not answer %q within %s; %d other command(s) are still in flight to it, "+
+			return nil, withKind(ErrTimeout, fmt.Sprintf("figma plugin %q did not answer %q within %s; %d other command(s) are still in flight to it, "+
 				"so it is busy rather than stuck — retry, or run fewer sessions against this file at once",
-				pc.label(), command, timeout, inflight)
+				pc.label(), command, timeout, inflight))
 		}
-		return nil, fmt.Errorf("figma plugin %q did not answer %q within %s", pc.label(), command, timeout)
+		return nil, withKind(ErrTimeout, fmt.Sprintf("figma plugin %q did not answer %q within %s", pc.label(), command, timeout))
 	}
 }
 
@@ -500,6 +521,33 @@ type peerResponse struct {
 	ID     string          `json:"id"`
 	Result json.RawMessage `json:"result,omitempty"`
 	Error  string          `json:"error,omitempty"`
+	// Kind carries the sentinel across the socket, since Error is only text.
+	Kind string `json:"kind,omitempty"`
+}
+
+const (
+	kindTimeout      = "timeout"
+	kindDisconnected = "disconnected"
+)
+
+func errKind(err error) string {
+	switch {
+	case errors.Is(err, ErrTimeout):
+		return kindTimeout
+	case errors.Is(err, ErrDisconnected):
+		return kindDisconnected
+	}
+	return ""
+}
+
+func (r peerResponse) err() error {
+	switch r.Kind {
+	case kindTimeout:
+		return withKind(ErrTimeout, r.Error)
+	case kindDisconnected:
+		return withKind(ErrDisconnected, r.Error)
+	}
+	return errors.New(r.Error)
 }
 
 // handlePeer serves one peer MCP session: every request is handled in its
@@ -535,6 +583,7 @@ func (b *Bridge) handlePeer(w http.ResponseWriter, r *http.Request) {
 				resp.Result, _ = json.Marshal(b.Files())
 			} else if raw, err := b.CallFile(ctx, req.File, req.Command, req.Params, timeout); err != nil {
 				resp.Error = err.Error()
+				resp.Kind = errKind(err)
 			} else {
 				resp.Result = raw
 			}

@@ -195,6 +195,21 @@ func TestPeerForwarding(t *testing.T) {
 	}
 }
 
+func TestPeerTimeoutKeepsKind(t *testing.T) {
+	b := New()
+	base := startBridge(t, b)
+	fakePlugin(t, b, base, "Slow", func(req Request) *Response { return nil })
+
+	p, err := DialPeer(srvPort(t, base))
+	if err != nil {
+		t.Fatalf("DialPeer: %v", err)
+	}
+	_, err = p.Call(context.Background(), "", "slow", nil, 100*time.Millisecond)
+	if !errors.Is(err, ErrTimeout) || !strings.Contains(err.Error(), `figma plugin "Slow" did not answer`) {
+		t.Fatalf("want owner timeout via peer, got %v", err)
+	}
+}
+
 func TestCallPluginError(t *testing.T) {
 	b := New()
 	base := startBridge(t, b)
@@ -222,7 +237,7 @@ func TestCallTimeout(t *testing.T) {
 	fakePlugin(t, b, base, "Slow", func(req Request) *Response { return nil }) // never answers
 
 	_, err := b.CallFile(context.Background(), "", "slow", nil, 100*time.Millisecond)
-	if err == nil || !strings.Contains(err.Error(), "did not answer") {
+	if !errors.Is(err, ErrTimeout) || !strings.Contains(err.Error(), "did not answer") {
 		t.Fatalf("want timeout error, got %v", err)
 	}
 	b.mu.Lock()
@@ -248,7 +263,7 @@ func TestDisconnectFailsPending(t *testing.T) {
 
 	select {
 	case err := <-done:
-		if err == nil || !strings.Contains(err.Error(), "disconnected") {
+		if !errors.Is(err, ErrDisconnected) || err.Error() != "plugin disconnected" {
 			t.Fatalf("want disconnected error, got %v", err)
 		}
 	case <-time.After(3 * time.Second):

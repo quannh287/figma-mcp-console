@@ -197,10 +197,18 @@ function serialize(n, depth, compact) {
   return s;
 }
 
+function has(x) {
+  return x !== undefined && x !== null;
+}
+
+function need(n, prop, what, id = n.id) {
+  if (!(prop in n)) throw new Error("node " + id + " " + what);
+}
+
 async function parentOf(params) {
   if (params.parent_id) {
     const p = await node(params.parent_id);
-    if (!("appendChild" in p)) throw new Error("node " + params.parent_id + " cannot have children");
+    need(p, "appendChild", "cannot have children", params.parent_id);
     return p;
   }
   return figma.currentPage;
@@ -213,7 +221,7 @@ function buildGradient(g) {
     const c = hexToRGB(s.color);
     return {
       position: s.position,
-      color: { r: c.r, g: c.g, b: c.b, a: s.opacity === undefined || s.opacity === null ? 1 : s.opacity },
+      color: { r: c.r, g: c.g, b: c.b, a: has(s.opacity) ? s.opacity : 1 },
     };
   });
   if (stops.length < 2) throw new Error("gradient needs at least 2 stops");
@@ -249,7 +257,7 @@ function buildEffects(list) {
       throw new Error("unsupported effect type: " + type);
     }
     const color = hexToRGB(e.color || "#000000");
-    color.a = e.color_opacity === undefined ? 0.25 : e.color_opacity;
+    color.a = has(e.color_opacity) ? e.color_opacity : 0.25;
     return {
       type,
       color,
@@ -270,6 +278,12 @@ function applyShapeParams(n, params) {
   if (params.fill_color && params.fill_color !== "none") {
     n.fills = [{ type: "SOLID", color: hexToRGB(params.fill_color) }];
   }
+}
+
+async function makeShape(n, params) {
+  applyShapeParams(n, params);
+  (await parentOf(params)).appendChild(n);
+  return summarize(n);
 }
 
 // Tracking the nodes a script creates needs a wrapper around figma, but the
@@ -388,7 +402,7 @@ function buildTransition(item) {
   const t = {
     type,
     easing: { type: (item.easing || "EASE_OUT").toUpperCase() },
-    duration: item.duration === undefined || item.duration === null ? 0.3 : item.duration,
+    duration: has(item.duration) ? item.duration : 0.3,
   };
   if (directional) {
     t.direction = (item.direction || "LEFT").toUpperCase();
@@ -485,23 +499,15 @@ const handlers = {
     // Figma gives new frames an opaque white fill, which silently covers
     // whatever sits behind a nested frame. Transparent unless asked.
     if (!params.fill_color || params.fill_color === "none") f.fills = [];
-    applyShapeParams(f, params);
-    (await parentOf(params)).appendChild(f);
-    return summarize(f);
+    return makeShape(f, params);
   },
 
   async create_rectangle(params) {
-    const r = figma.createRectangle();
-    applyShapeParams(r, params);
-    (await parentOf(params)).appendChild(r);
-    return summarize(r);
+    return makeShape(figma.createRectangle(), params);
   },
 
   async create_ellipse(params) {
-    const e = figma.createEllipse();
-    applyShapeParams(e, params);
-    (await parentOf(params)).appendChild(e);
-    return summarize(e);
+    return makeShape(figma.createEllipse(), params);
   },
 
   async create_line(params) {
@@ -511,7 +517,7 @@ const handlers = {
     l.resize(params.length > 0 ? params.length : 100, 0);
     l.strokes = [{ type: "SOLID", color: hexToRGB(params.stroke_color || "#000000") }];
     if (params.stroke_weight) l.strokeWeight = params.stroke_weight;
-    if (params.rotation !== undefined && params.rotation !== null) l.rotation = params.rotation;
+    if (has(params.rotation)) l.rotation = params.rotation;
     if (params.name) l.name = params.name;
     (await parentOf(params)).appendChild(l);
     return summarize(l);
@@ -523,7 +529,7 @@ const handlers = {
     let n;
     if (params.node_id) {
       n = await node(params.node_id);
-      if (!("fills" in n)) throw new Error("node " + params.node_id + " has no fills");
+      need(n, "fills", "has no fills", params.node_id);
       n.fills = [paint];
     } else {
       const size = await image.getSizeAsync();
@@ -549,7 +555,7 @@ const handlers = {
     if (params.font_size) t.fontSize = params.font_size;
     if (params.fill_color) t.fills = [{ type: "SOLID", color: hexToRGB(params.fill_color) }];
     if (params.line_height) t.lineHeight = { value: params.line_height, unit: "PIXELS" };
-    if (params.letter_spacing !== undefined && params.letter_spacing !== null) {
+    if (has(params.letter_spacing)) {
       t.letterSpacing = { value: params.letter_spacing, unit: "PIXELS" };
     }
     if (params.text_align) t.textAlignHorizontal = params.text_align;
@@ -589,10 +595,10 @@ const handlers = {
       } else {
         throw new Error('set_fills needs color, gradient, or color: "none" to clear');
       }
-      if (params.opacity !== undefined && params.opacity !== null) paint.opacity = params.opacity;
+      if (has(params.opacity)) paint.opacity = params.opacity;
     }
     for (const n of nodes) {
-      if (!("fills" in n)) throw new Error("node " + n.id + " has no fills");
+      need(n, "fills", "has no fills");
       n.fills = clear ? [] : [paint];
     }
     return done(params, nodes);
@@ -602,7 +608,7 @@ const handlers = {
     const out = [];
     for (const item of params.items) {
       const n = await node(item.node_id);
-      if (!("x" in n)) throw new Error("node " + item.node_id + " cannot be moved");
+      need(n, "x", "cannot be moved", item.node_id);
       n.x = item.x;
       n.y = item.y;
       out.push(n);
@@ -614,7 +620,7 @@ const handlers = {
     const out = [];
     for (const item of params.items) {
       const n = await node(item.node_id);
-      if (!("resize" in n)) throw new Error("node " + item.node_id + " cannot be resized");
+      need(n, "resize", "cannot be resized", item.node_id);
       n.resize(item.width, item.height);
       out.push(n);
     }
@@ -633,17 +639,17 @@ const handlers = {
 
   async set_auto_layout(params) {
     const n = await node(params.node_id);
-    if (!("layoutMode" in n)) throw new Error("node " + params.node_id + " does not support auto-layout");
+    need(n, "layoutMode", "does not support auto-layout", params.node_id);
     n.layoutMode = params.layout_mode;
     if (params.layout_mode === "NONE") return done(params, n);
-    if (params.item_spacing !== undefined) n.itemSpacing = params.item_spacing;
-    if (params.padding !== undefined) {
+    if (has(params.item_spacing)) n.itemSpacing = params.item_spacing;
+    if (has(params.padding)) {
       n.paddingTop = n.paddingRight = n.paddingBottom = n.paddingLeft = params.padding;
     }
-    if (params.padding_top !== undefined) n.paddingTop = params.padding_top;
-    if (params.padding_right !== undefined) n.paddingRight = params.padding_right;
-    if (params.padding_bottom !== undefined) n.paddingBottom = params.padding_bottom;
-    if (params.padding_left !== undefined) n.paddingLeft = params.padding_left;
+    if (has(params.padding_top)) n.paddingTop = params.padding_top;
+    if (has(params.padding_right)) n.paddingRight = params.padding_right;
+    if (has(params.padding_bottom)) n.paddingBottom = params.padding_bottom;
+    if (has(params.padding_left)) n.paddingLeft = params.padding_left;
     if (params.primary_axis_align) n.primaryAxisAlignItems = params.primary_axis_align;
     if (params.counter_axis_align) n.counterAxisAlignItems = params.counter_axis_align;
     if (params.primary_axis_sizing) n.primaryAxisSizingMode = params.primary_axis_sizing;
@@ -654,18 +660,18 @@ const handlers = {
   async set_corner_radius(params) {
     const nodes = await targets(params);
     for (const n of nodes) {
-      if (params.radius !== undefined) {
-        if (!("cornerRadius" in n)) throw new Error("node " + n.id + " has no corner radius");
+      if (has(params.radius)) {
+        need(n, "cornerRadius", "has no corner radius");
         n.cornerRadius = params.radius;
       }
       if (!("topLeftRadius" in n)) {
-        if (params.radius === undefined) throw new Error("node " + n.id + " has no per-corner radius");
+        if (!has(params.radius)) throw new Error("node " + n.id + " has no per-corner radius");
         continue;
       }
-      if (params.top_left !== undefined) n.topLeftRadius = params.top_left;
-      if (params.top_right !== undefined) n.topRightRadius = params.top_right;
-      if (params.bottom_right !== undefined) n.bottomRightRadius = params.bottom_right;
-      if (params.bottom_left !== undefined) n.bottomLeftRadius = params.bottom_left;
+      if (has(params.top_left)) n.topLeftRadius = params.top_left;
+      if (has(params.top_right)) n.topRightRadius = params.top_right;
+      if (has(params.bottom_right)) n.bottomRightRadius = params.bottom_right;
+      if (has(params.bottom_left)) n.bottomLeftRadius = params.bottom_left;
     }
     return done(params, nodes);
   },
@@ -673,15 +679,15 @@ const handlers = {
   async set_strokes(params) {
     const nodes = await targets(params);
     for (const n of nodes) {
-      if (!("strokes" in n)) throw new Error("node " + n.id + " has no strokes");
+      need(n, "strokes", "has no strokes");
       if (params.color && params.color !== "none") {
         const paint = { type: "SOLID", color: hexToRGB(params.color) };
-        if (params.opacity !== undefined && params.opacity !== null) paint.opacity = params.opacity;
+        if (has(params.opacity)) paint.opacity = params.opacity;
         n.strokes = [paint];
       } else {
         n.strokes = [];
       }
-      if (params.weight !== undefined && "strokeWeight" in n) n.strokeWeight = params.weight;
+      if (has(params.weight) && "strokeWeight" in n) n.strokeWeight = params.weight;
       if (params.align && "strokeAlign" in n) n.strokeAlign = params.align;
     }
     return done(params, nodes);
@@ -691,7 +697,7 @@ const handlers = {
     const nodes = await targets(params);
     const effects = buildEffects(params.effects);
     for (const n of nodes) {
-      if (!("effects" in n)) throw new Error("node " + n.id + " has no effects");
+      need(n, "effects", "has no effects");
       n.effects = effects;
     }
     return done(params, nodes);
@@ -729,10 +735,10 @@ const handlers = {
         n.fontName = font;
       }
       if (params.font_size) n.fontSize = params.font_size;
-      if (params.line_height !== undefined && params.line_height !== null) {
+      if (has(params.line_height)) {
         n.lineHeight = { value: params.line_height, unit: "PIXELS" };
       }
-      if (params.letter_spacing !== undefined && params.letter_spacing !== null) {
+      if (has(params.letter_spacing)) {
         n.letterSpacing = { value: params.letter_spacing, unit: "PIXELS" };
       }
       if (params.text_align) n.textAlignHorizontal = params.text_align;
@@ -748,7 +754,7 @@ const handlers = {
     for (const item of params.items) {
       try {
         const target = await node(item.node_id);
-        if (!("exportAsync" in target)) throw new Error("node " + item.node_id + " cannot be exported");
+        need(target, "exportAsync", "cannot be exported", item.node_id);
         const format = (item.format || "PNG").toUpperCase();
         let settings;
         if (format === "SVG") {
@@ -787,7 +793,7 @@ const handlers = {
     if (params.node_id) scope = await node(params.node_id);
     else if (params.page) scope = await resolvePage(params.page);
     else scope = figma.currentPage;
-    if (!("findAll" in scope)) throw new Error("node " + scope.id + " has no children to search");
+    need(scope, "findAll", "has no children to search");
     const name = params.name ? params.name.toLowerCase() : null;
     const text = params.text ? params.text.toLowerCase() : null;
     const types = params.types && params.types.length ? params.types : null;
@@ -804,7 +810,7 @@ const handlers = {
         const hex = solidFillHex(n);
         if (!hex || hex.toLowerCase() !== fill) return false;
       }
-      if (fontSize !== undefined && fontSize !== null) {
+      if (has(fontSize)) {
         if (n.type !== "TEXT" || val(n.fontSize) !== fontSize) return false;
       }
       if (fontStyle) {
@@ -858,7 +864,7 @@ const handlers = {
 
   async append_children(params) {
     const parent = await node(params.parent_id);
-    if (!("appendChild" in parent)) throw new Error("node " + params.parent_id + " cannot have children");
+    need(parent, "appendChild", "cannot have children", params.parent_id);
     const moved = [];
     const warnings = [];
     let index = params.index;
@@ -872,7 +878,7 @@ const handlers = {
           "; Figma renames detached variants to <Set>/<Variant>",
         );
       }
-      if (index === undefined || index === null) {
+      if (!has(index)) {
         parent.appendChild(n);
       } else {
         parent.insertChild(index++, n);
@@ -884,15 +890,15 @@ const handlers = {
 
   async clone_node(params) {
     const n = await node(params.node_id);
-    if (!("clone" in n)) throw new Error("node " + params.node_id + " cannot be cloned");
+    need(n, "clone", "cannot be cloned", params.node_id);
     const copy = n.clone();
     if (params.parent_id) {
       const p = await node(params.parent_id);
-      if (!("appendChild" in p)) throw new Error("node " + params.parent_id + " cannot have children");
+      need(p, "appendChild", "cannot have children", params.parent_id);
       p.appendChild(copy);
     }
-    if (params.x !== undefined) copy.x = params.x;
-    if (params.y !== undefined) copy.y = params.y;
+    if (has(params.x)) copy.x = params.x;
+    if (has(params.y)) copy.y = params.y;
     if (params.name) copy.name = params.name;
     return summarize(copy);
   },
@@ -943,8 +949,8 @@ const handlers = {
     const c = await node(params.component_id);
     if (c.type !== "COMPONENT") throw new Error("node " + params.component_id + " is " + c.type + ", not a COMPONENT");
     const inst = c.createInstance();
-    if (params.x !== undefined) inst.x = params.x;
-    if (params.y !== undefined) inst.y = params.y;
+    if (has(params.x)) inst.x = params.x;
+    if (has(params.y)) inst.y = params.y;
     (await parentOf(params)).appendChild(inst);
     return summarize(inst);
   },
@@ -973,7 +979,7 @@ const handlers = {
     // Figma requires a default of the matching kind; pick the empty one
     // rather than failing a call that only omitted it.
     let def = params.default_value;
-    if (def === undefined || def === null) def = type === "BOOLEAN" ? false : "";
+    if (!has(def)) def = type === "BOOLEAN" ? false : "";
     const key = c.addComponentProperty(params.name, type, def);
     if (params.bind_node_id) {
       const t = await node(params.bind_node_id);
@@ -1036,7 +1042,7 @@ const handlers = {
     const s = figma.createPaintStyle();
     s.name = params.name;
     const paint = { type: "SOLID", color: hexToRGB(params.color) };
-    if (params.opacity !== undefined && params.opacity !== null) paint.opacity = params.opacity;
+    if (has(params.opacity)) paint.opacity = params.opacity;
     s.paints = [paint];
     return { id: s.id, name: s.name };
   },
@@ -1130,7 +1136,7 @@ const handlers = {
     const c = await figma.variables.getVariableCollectionByIdAsync(params.collection_id);
     if (!c) throw new Error("variable collection not found: " + params.collection_id);
     const v = figma.variables.createVariable(params.name, c, params.type);
-    if (params.value !== undefined && params.value !== null) {
+    if (has(params.value)) {
       v.setValueForMode(c.defaultModeId, variableValue(v, params.value));
     }
     return { id: v.id, name: v.name, resolvedType: v.resolvedType, collectionId: c.id };
@@ -1152,7 +1158,7 @@ const handlers = {
     const field = params.field;
     for (const n of nodes) {
       if (field === "fills" || field === "strokes") {
-        if (!(field in n)) throw new Error("node " + n.id + " has no " + field);
+        need(n, field, "has no " + field);
         const paints = n[field].length ? n[field] : [{ type: "SOLID", color: { r: 0, g: 0, b: 0 } }];
         n[field] = [figma.variables.setBoundVariableForPaint(paints[0], "color", v)].concat(paints.slice(1));
       } else {
@@ -1270,7 +1276,7 @@ const handlers = {
     } else {
       target = figma.currentPage;
     }
-    if (!("exportAsync" in target)) throw new Error("node " + target.id + " cannot be exported");
+    need(target, "exportAsync", "cannot be exported");
     // With dynamic-page access a node can be reachable before its page is
     // loaded, and exporting then yields a blank image with no error.
     let owner = target;
