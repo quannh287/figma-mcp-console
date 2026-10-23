@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/quannh287/figma-relay/compare/v0.9.0...v0.9.1) (2026-10-23)
+
+
+### Bug Fixes
+
+* rename MCP server to figma-relay to match the figrelay package ([970fdd6](https://github.com/quannh287/figma-relay/commit/970fdd657137a2b9b7321fa328a505828d11cec2))
+
 ## [0.9.0](https://github.com/quannh287/figma-relay/compare/v0.8.1...v0.9.0) (2026-10-19)
 
 
