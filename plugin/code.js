@@ -2,7 +2,7 @@
 // Receives {id, command, params} from the Go bridge (relayed through ui.html),
 // executes it against the Figma Plugin API, and replies {id, result|error}.
 
-figma.showUI(__html__, { width: 280, height: 104 });
+figma.showUI(__html__, { width: 280, height: 104, themeColors: true });
 
 // The UI can collapse to a dot; selection changes must not resize it back.
 let collapsed = false;

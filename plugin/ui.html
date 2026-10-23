@@ -16,15 +16,19 @@
       sans-serif;
     margin: 0;
     padding: 10px;
-    color: #2c2c34;
-    background: linear-gradient(160deg, #f6f7fb 0%, #eef0f7 100%);
+    color: var(--figma-color-text, #2c2c34);
+    background: linear-gradient(
+      160deg,
+      var(--figma-color-bg-secondary, #f6f7fb) 0%,
+      var(--figma-color-bg-secondary, #eef0f7) 100%
+    );
     display: flex;
     flex-direction: column;
   }
 
   .card {
-    background: #fff;
-    border: 1px solid #e6e8f0;
+    background: var(--figma-color-bg, #fff);
+    border: 1px solid var(--figma-color-border, #e6e8f0);
     border-radius: 9px;
     padding: 7px 9px;
     box-shadow: 0 1px 2px rgba(30, 34, 60, 0.04);
@@ -37,7 +41,7 @@
     cursor: pointer;
     font-weight: 600;
     font-size: 13px;
-    color: #1f2330;
+    color: var(--figma-color-text, #1f2330);
   }
 
   #dot {
@@ -45,7 +49,7 @@
     width: 9px;
     height: 9px;
     border-radius: 50%;
-    background: #e0555b;
+    background: var(--figma-color-icon-danger, #e0555b);
     box-shadow: 0 0 0 3px rgba(224, 85, 91, 0.15);
     transition:
       background 0.2s,
@@ -53,7 +57,7 @@
   }
 
   #dot.on {
-    background: #22a06b;
+    background: var(--figma-color-icon-success, #22a06b);
     box-shadow: 0 0 0 3px rgba(34, 160, 107, 0.15);
   }
 
@@ -65,15 +69,15 @@
     border: 0;
     border-radius: 5px;
     background: transparent;
-    color: #8288a0;
+    color: var(--figma-color-text-secondary, #8288a0);
     font-size: 13px;
     line-height: 1;
     cursor: pointer;
   }
 
   #collapse:hover {
-    background: #eef0f7;
-    color: #2c2c34;
+    background: var(--figma-color-bg-hover, #eef0f7);
+    color: var(--figma-color-text, #2c2c34);
   }
 
   /* Collapsed: the dot only, at Figma's 70px minimum width. */
@@ -96,7 +100,7 @@
   }
 
   #hint {
-    color: #6b6f7d;
+    color: var(--figma-color-text-secondary, #6b6f7d);
     margin-top: 5px;
     font-size: 10px;
     line-height: 1.35;
@@ -105,7 +109,7 @@
   #result {
     display: none;
     margin-top: 10px;
-    border-top: 1px solid #eceef5;
+    border-top: 1px solid var(--figma-color-border, #eceef5);
     padding-top: 9px;
   }
 
@@ -123,7 +127,7 @@
   .res-title {
     font-weight: 600;
     font-size: 11px;
-    color: #1f2330;
+    color: var(--figma-color-text, #1f2330);
   }
 
   .res-list {
@@ -139,9 +143,9 @@
     align-items: center;
     gap: 6px;
     padding: 5px 7px;
-    border: 1px solid #e6e8f0;
+    border: 1px solid var(--figma-color-border, #e6e8f0);
     border-radius: 7px;
-    background: #fbfcfe;
+    background: var(--figma-color-bg-secondary, #fbfcfe);
   }
 
   .res-name {
@@ -151,22 +155,22 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     font-size: 11px;
-    color: #2c2c34;
+    color: var(--figma-color-text, #2c2c34);
   }
 
   .res-type {
     flex: none;
     font-size: 9px;
-    color: #a0a4b0;
+    color: var(--figma-color-text-tertiary, #a0a4b0);
     text-transform: uppercase;
     letter-spacing: 0.03em;
   }
 
   .copy-btn {
     flex: none;
-    border: 1px solid #d6d9e6;
-    background: #fff;
-    color: #4b5168;
+    border: 1px solid var(--figma-color-border-strong, #d6d9e6);
+    background: var(--figma-color-bg, #fff);
+    color: var(--figma-color-text-secondary, #4b5168);
     border-radius: 6px;
     padding: 2px 8px;
     font-size: 10px;
@@ -174,13 +178,13 @@
   }
 
   .copy-btn:hover {
-    background: #f0f2f8;
+    background: var(--figma-color-bg-hover, #f0f2f8);
   }
 
   .copy-btn.done {
-    color: #22a06b;
-    border-color: #bfe6d3;
-    background: #f0faf5;
+    color: var(--figma-color-text-success, #22a06b);
+    border-color: var(--figma-color-border-success, #bfe6d3);
+    background: var(--figma-color-bg-success-tertiary, #f0faf5);
   }
 
   .copy-all {
@@ -196,9 +200,9 @@
 
   .filter-btn {
     flex: none;
-    border: 1px solid #d6d9e6;
-    background: #fff;
-    color: #6b6f7d;
+    border: 1px solid var(--figma-color-border-strong, #d6d9e6);
+    background: var(--figma-color-bg, #fff);
+    color: var(--figma-color-text-secondary, #6b6f7d);
     border-radius: 6px;
     padding: 3px 9px;
     font-size: 10px;
@@ -206,32 +210,32 @@
   }
 
   .filter-btn:hover {
-    background: #f0f2f8;
+    background: var(--figma-color-bg-hover, #f0f2f8);
   }
 
   .filter-btn.on {
-    background: #2c2c34;
-    border-color: #2c2c34;
-    color: #fff;
+    background: var(--figma-color-bg-inverse, #2c2c34);
+    border-color: var(--figma-color-bg-inverse, #2c2c34);
+    color: var(--figma-color-text-oninverse, #fff);
   }
 
   .res-empty {
     font-size: 11px;
-    color: #a0a4b0;
+    color: var(--figma-color-text-tertiary, #a0a4b0);
     padding: 6px 2px;
   }
 
   .key-prompt {
     margin-bottom: 8px;
     padding: 7px 8px;
-    border: 1px solid #ffe0a6;
-    background: #fff9ec;
+    border: 1px solid var(--figma-color-border-warning, #ffe0a6);
+    background: var(--figma-color-bg-warning-tertiary, #fff9ec);
     border-radius: 7px;
   }
 
   .key-note {
     font-size: 10px;
-    color: #8a6d3b;
+    color: var(--figma-color-text-warning, #8a6d3b);
     line-height: 1.4;
     margin-bottom: 5px;
   }
@@ -244,7 +248,9 @@
   .key-input {
     flex: 1;
     min-width: 0;
-    border: 1px solid #d6d9e6;
+    border: 1px solid var(--figma-color-border-strong, #d6d9e6);
+    background: var(--figma-color-bg, #fff);
+    color: var(--figma-color-text, #000);
     border-radius: 6px;
     padding: 3px 6px;
     font-size: 10px;
@@ -252,8 +258,9 @@
 
   .key-save {
     flex: none;
-    border: 1px solid #d6d9e6;
-    background: #fff;
+    border: 1px solid var(--figma-color-border-strong, #d6d9e6);
+    background: var(--figma-color-bg, #fff);
+    color: var(--figma-color-text, #000);
     border-radius: 6px;
     padding: 3px 10px;
     font-size: 10px;
@@ -261,24 +268,24 @@
   }
 
   .key-save:hover {
-    background: #f0f2f8;
+    background: var(--figma-color-bg-hover, #f0f2f8);
   }
 
   #credit {
     margin-top: auto;
     padding-top: 7px;
     text-align: center;
-    color: #a0a4b0;
+    color: var(--figma-color-text-tertiary, #a0a4b0);
     font-size: 10px;
   }
 
   #version {
-    color: #8288a0;
+    color: var(--figma-color-text-secondary, #8288a0);
     margin-right: 4px;
   }
 
   #credit a {
-    color: #8288a0;
+    color: var(--figma-color-text-secondary, #8288a0);
     text-decoration: none;
   }
 
