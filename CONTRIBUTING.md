@@ -18,8 +18,8 @@ go build -o /tmp/figma-mcp ./cmd/figma-mcp
 
 # 2. Point your MCP client at that binary instead of npx.
 #    Claude CLI, from the directory you want it registered in:
-claude mcp remove figma-console
-claude mcp add figma-console -- /tmp/figma-mcp
+claude mcp remove figma-relay
+claude mcp add figma-relay -- /tmp/figma-mcp
 ```
 
 Then in Figma Desktop: **Plugins → Development → Import plugin from manifest…** → pick `plugin/manifest.json` **from your checkout**, and run **Plugins → Development → Figma Relay**. Keep the window open; a green dot means it reached the bridge.

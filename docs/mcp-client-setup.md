@@ -5,8 +5,8 @@ Every client runs the same command: `npx -y figrelay@latest`. No install step â€
 ## Claude CLI
 
 ```sh
-claude mcp add figma-console -- npx -y figrelay@latest              # this project only
-claude mcp add --scope user figma-console -- npx -y figrelay@latest # all projects
+claude mcp add figma-relay -- npx -y figrelay@latest              # this project only
+claude mcp add --scope user figma-relay -- npx -y figrelay@latest # all projects
 ```
 
 Both behave the same at runtime: each session starts its own server in that project's directory (so exported assets land in the right project), and all instances share one local bridge. A project-level `.mcp.json` with the canonical block works too.
@@ -18,13 +18,13 @@ Both behave the same at runtime: each session starts its own server in that proj
 ## Codex CLI
 
 ```sh
-codex mcp add figma-console -- npx -y figrelay@latest
+codex mcp add figma-relay -- npx -y figrelay@latest
 ```
 
 Or in `~/.codex/config.toml`:
 
 ```toml
-[mcp_servers.figma-console]
+[mcp_servers.figma-relay]
 command = "npx"
 args = ["-y", "figrelay@latest"]
 ```
@@ -36,7 +36,7 @@ The only client needing a different shape â€” `servers`, not `mcpServers`. Creat
 ```json
 {
   "servers": {
-    "figma-console": {
+    "figma-relay": {
       "type": "stdio",
       "command": "npx",
       "args": ["-y", "figrelay@latest"],

@@ -19,7 +19,7 @@ func RegisterPrompts(s *mcp.Server) {
 		brief := req.Params.Arguments["brief"]
 		text := fmt.Sprintf(`Design the following in Figma: %s
 
-Follow this workflow, using the figma-console MCP tools:
+Follow this workflow, using the figma-relay MCP tools:
 
 1. Inspect first: call get_metadata and get_selection to understand the current file and where to place new work. In large files, locate existing layers with find_nodes instead of walking the tree.
 2. Create a root frame with create_shape (type FRAME) at an empty spot on the page, sized for the target device (e.g. 390x844 for mobile, 1440x900 for desktop). All other layers go inside it via parent_id.

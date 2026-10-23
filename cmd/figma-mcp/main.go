@@ -67,7 +67,7 @@ func main() {
 	r := bridge.NewRouter(project, version, *port)
 
 	server := mcp.NewServer(&mcp.Implementation{
-		Name:    "figma-console",
+		Name:    "figma-relay",
 		Title:   "Figma Relay",
 		Version: version,
 	}, nil)

@@ -18,7 +18,7 @@ Needs [Node.js](https://nodejs.org) 18+ and the **Figma Desktop** app (the web a
 ```json
 {
   "mcpServers": {
-    "figma-console": {
+    "figma-relay": {
       "command": "npx",
       "args": ["-y", "figrelay@latest"]
     }
@@ -28,9 +28,9 @@ Needs [Node.js](https://nodejs.org) 18+ and the **Figma Desktop** app (the web a
 
 | Client | Where the config lives |
 |---|---|
-| Claude CLI | `claude mcp add figma-console -- npx -y figrelay@latest`, or `.mcp.json` |
+| Claude CLI | `claude mcp add figma-relay -- npx -y figrelay@latest`, or `.mcp.json` |
 | Claude Desktop | Settings → Developer → Edit Config (`claude_desktop_config.json`) |
-| Codex CLI | `codex mcp add figma-console -- npx -y figrelay@latest`, or `~/.codex/config.toml` (TOML) |
+| Codex CLI | `codex mcp add figma-relay -- npx -y figrelay@latest`, or `~/.codex/config.toml` (TOML) |
 | VS Code (Copilot) | `.vscode/mcp.json` — **different shape**, see the doc |
 | Cursor | `.cursor/mcp.json` |
 | Antigravity | MCP Servers → Manage → View raw config (`mcp_config.json`) |
@@ -64,7 +64,7 @@ The tools tell the AI *what it can call*; the skills tell it *how to do the job 
 Every listed tool costs context, even in sessions that never touch Figma. `FIGMA_MCP_DISABLE` (or the `-disable` flag) hides whole groups: `components`, `styles`, `variables`, `prototype`. Hiding all four cuts the tool list by about a third.
 
 ```json
-"figma-console": {
+"figma-relay": {
   "command": "npx",
   "args": ["-y", "figrelay@latest"],
   "env": { "FIGMA_MCP_DISABLE": "variables,prototype" }
