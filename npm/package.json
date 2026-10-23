@@ -1,6 +1,6 @@
 {
   "name": "figrelay",
-  "version": "0.9.1",
+  "version": "0.10.0",
   "scripts": {
     "prepublishOnly": "cp ../README.md ./README.md"
   },

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/quannh287/figma-relay/compare/v0.9.1...v0.10.0) (2026-10-23)
+
+
+### Features
+
+* **plugin:** follow Figma's light/dark theme via themeColors ([ce45ad3](https://github.com/quannh287/figma-relay/commit/ce45ad35c4eba751a400794199f705e96490219e))
+
 ## [0.9.1](https://github.com/quannh287/figma-relay/compare/v0.9.0...v0.9.1) (2026-10-23)
 
 
