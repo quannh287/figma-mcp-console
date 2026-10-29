@@ -452,6 +452,18 @@ function pageOf(n) {
   return n;
 }
 
+// Direct children's boxes relative to the parent, so spacing and centering can be
+// measured without a script.
+function childBounds(target) {
+  const o = target.absoluteBoundingBox;
+  if (!o || !("children" in target)) return [];
+  const r = (v) => Math.round(v * 100) / 100;
+  return target.children.filter((c) => c.visible && c.absoluteBoundingBox).map((c) => {
+    const b = c.absoluteBoundingBox;
+    return { id: c.id, name: c.name, x: r(b.x - o.x), y: r(b.y - o.y), width: r(b.width), height: r(b.height) };
+  });
+}
+
 // ---------- command handlers (names match MCP tool names) ----------
 
 const handlers = {
@@ -900,7 +912,13 @@ const handlers = {
     if (has(params.x)) copy.x = params.x;
     if (has(params.y)) copy.y = params.y;
     if (params.name) copy.name = params.name;
-    return summarize(copy);
+    const out = summarize(copy);
+    // Figma copies a frame's flow starting point onto its clone, leaving duplicate flows behind.
+    const page = pageOf(copy);
+    if (page.flowStartingPoints.some((p) => p.nodeId === copy.id)) {
+      out.warning = "the copy is also a prototype flow starting point; remove it with set_flow_starting_point remove: true if unwanted";
+    }
+    return out;
   },
 
   async list_available_fonts(params) {
@@ -1298,6 +1316,7 @@ const handlers = {
       scale,
       clamped,
       sourceHeight: "height" in target ? target.height : 0,
+      bounds: params.bounds ? childBounds(target) : undefined,
     };
   },
 };

@@ -526,15 +526,17 @@ type screenshotArgs struct {
 	NodeID       string  `json:"node_id,omitempty" jsonschema:"node to capture (default: current selection, else current page)"`
 	Scale        float64 `json:"scale,omitempty" jsonschema:"export scale 0.5..4 (default 1)"`
 	MaxDimension float64 `json:"max_dimension,omitempty" jsonschema:"longest side in pixels before the scale is reduced to fit (default 2000, ceiling 4096)"`
+	Bounds       bool    `json:"bounds,omitempty" jsonschema:"also return each visible direct child's id, name and box (x/y relative to the node, width, height) to check spacing and centering"`
 }
 
 type screenshotResult struct {
-	Data         string  `json:"data"`
-	Width        float64 `json:"width"`
-	Height       float64 `json:"height"`
-	Scale        float64 `json:"scale"`
-	Clamped      bool    `json:"clamped"`
-	SourceHeight float64 `json:"sourceHeight"`
+	Data         string          `json:"data"`
+	Width        float64         `json:"width"`
+	Height       float64         `json:"height"`
+	Scale        float64         `json:"scale"`
+	Clamped      bool            `json:"clamped"`
+	SourceHeight float64         `json:"sourceHeight"`
+	Bounds       json.RawMessage `json:"bounds,omitempty"`
 }
 
 // Register adds all Figma tools to the MCP server.
@@ -820,6 +822,9 @@ func Register(s *mcp.Server, b *bridge.Router) {
 			} else {
 				note += "Screenshot a child node, or raise max_dimension, to read it."
 			}
+		}
+		if len(res.Bounds) > 0 {
+			note += "\nchild bounds (node px, not image px): " + string(res.Bounds)
 		}
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
