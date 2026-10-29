@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.11.0](https://github.com/quannh287/figma-relay/compare/v0.10.0...v0.11.0) (2026-10-29)
+
+
+### Features
+
+* **tools:** child bounds in get_screenshot, warn when clone_node copies a flow start ([585beab](https://github.com/quannh287/figma-relay/commit/585beab69290d197116d206c11172188ff974ac2))
+
+
+### Bug Fixes
+
+* **bridge:** tell the user how to reconnect when the plugin drops mid-call ([af91629](https://github.com/quannh287/figma-relay/commit/af916297223474648bd6b03cdc56d7722a5977dd))
+
 ## [0.10.0](https://github.com/quannh287/figma-relay/compare/v0.9.1...v0.10.0) (2026-10-23)
 
 
