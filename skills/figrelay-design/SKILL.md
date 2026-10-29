@@ -62,7 +62,13 @@ Finish with `set_selection` on the root frame so the user sees the result.
 - **Prototype**: `set_prototype_links` only joins **top-level frames on the same
   page**; a nested frame is rejected. Each call replaces that node's reactions, so
   pass all of a node's links together. Check with `get_prototype_links`,
-  mark the entry with `set_flow_starting_point`.
+  mark the entry with `set_flow_starting_point`. In `run_script`,
+  `setReactionsAsync` has no `WHILE_PRESSING` trigger — use `ON_PRESS`.
+  Cloning a frame also copies its flow starting point; `clone_node` warns, scripts
+  must remove the duplicate themselves.
+- **Overlays can't be bottom-anchored**: `overlayPositionType` is read-only and
+  `overlayRelativePosition` needs `MANUAL`. Make the overlay a full-screen frame
+  (device size) with a scrim and the sheet placed at the bottom inside it.
 
 ## Gotchas that cost time
 
@@ -74,8 +80,21 @@ Finish with `set_selection` on the root frame so the user sees the result.
   `set_auto_layout`, or re-apply the sizing modes afterwards — otherwise a frame
   set to hug ends up locked at the resized height with its content spilling out.
   It also does not move children unless they have constraints or auto layout.
+- **Auto layout doesn't always shrink**: after removing a tall child the parent can
+  keep its old height; set `layoutSizingVertical = "HUG"` again on it.
 - **Instances**: children have derived ids `I<instance-id>;<child-id>` — accepted
-  by every tool, returned by `find_nodes`.
+  by every tool, returned by `find_nodes`. Also:
+  - `swap_component` invalidates those ids — `find_nodes` again after a swap.
+  - Position/size of a child inside an instance can't be overridden
+    (`relative-transform` error) — change the main component or use auto layout.
+  - Editing a node right after `detach_instance` in the same script can throw
+    `object is not extensible`; re-fetch it with `getNodeByIdAsync` first.
+  - Overrides survive edits to the main component, so a changed main property may
+    not show on instances that overrode it.
+- **Strokes**: an `OUTSIDE` stroke on an ELLIPSE with an IMAGE fill renders a
+  jagged ring — wrap it in a frame with an `INSIDE` stroke instead. `dashPattern`
+  restarts on every edge of a rounded rect, so a progress ring needs an open
+  vector path, not dashes.
 - **Batch**: most edit tools take `node_ids`; feed `find_nodes` output straight in.
 
 ## `run_script` — the bulk path
