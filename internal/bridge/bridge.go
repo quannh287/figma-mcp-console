@@ -358,12 +358,18 @@ func (b *Bridge) readPlugin(pc *pluginConn) {
 	}
 }
 
+// disconnectedMsg says how to recover, since the usual cause is the plugin window being closed or reloaded.
+func disconnectedMsg(pc *pluginConn) string {
+	return fmt.Sprintf("figma plugin %q disconnected before answering, so the command may or may not have run; "+
+		"re-run Plugins → Development → Figma Relay in that file, then check the document before retrying", pc.label())
+}
+
 func (b *Bridge) dropPlugin(pc *pluginConn, err error) {
 	b.mu.Lock()
 	delete(b.conns, pc.id)
 	for id, p := range b.pending {
 		if p.connID == pc.id {
-			p.ch <- Response{ID: id, Error: "plugin disconnected", kind: ErrDisconnected}
+			p.ch <- Response{ID: id, Error: disconnectedMsg(pc), kind: ErrDisconnected}
 			delete(b.pending, id)
 		}
 	}

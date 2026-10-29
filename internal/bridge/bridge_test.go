@@ -263,7 +263,7 @@ func TestDisconnectFailsPending(t *testing.T) {
 
 	select {
 	case err := <-done:
-		if !errors.Is(err, ErrDisconnected) || err.Error() != "plugin disconnected" {
+		if !errors.Is(err, ErrDisconnected) || !strings.Contains(err.Error(), "re-run Plugins") {
 			t.Fatalf("want disconnected error, got %v", err)
 		}
 	case <-time.After(3 * time.Second):
